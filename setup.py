@@ -1,10 +1,27 @@
+"""Setup configuration for helm-image-updater package.
+
+This module configures the package for distribution, including dependencies,
+entry points, and metadata. It reads requirements from requirements.txt if available,
+otherwise uses a default set of requirements.
+
+Example:
+    To install the package:
+        $ pip install .
+    
+    To build the package:
+        $ python setup.py sdist bdist_wheel
+
+Attributes:
+    requirements_file (Path): Path to requirements.txt file
+    requirements (list): List of package dependencies
+"""
+
 from pathlib import Path
 from setuptools import setup, find_packages
 
-# Look for requirements.txt in the helm_image_updater folder
 requirements_file = Path("requirements.txt")
 if requirements_file.exists():
-    with open(requirements_file) as f:
+    with open(requirements_file, encoding="utf-8") as f:
         requirements = f.read().splitlines()
 else:
     # Default requirements if file is not found
@@ -25,9 +42,9 @@ setup(
             "helm-image-updater=helm_image_updater.cli:main",
         ],
     },
-    python_requires=">=3.8",
+    python_requires=">=3.13",
     description="Tool for updating Helm chart image tags across different stacks",
-    author="Your Name",
-    author_email="your.email@example.com",
-    url="https://github.com/yourusername/helm-image-updater",
+    author="Keboola",
+    author_email="michal.kozak@keboola.com",
+    url="https://github.com/keboola/helm-image-updater",
 )
