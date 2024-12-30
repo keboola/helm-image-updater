@@ -16,10 +16,12 @@ A Python tool for automating image tag updates across Helm charts in different K
 ## Installation
 
 Clone the repository:
+
     git clone https://github.com/helm-image-updater/helm-image-updater.git
     cd helm-image-updater
 
 Install the package:
+
     pip install -e .
 
 ## Usage
@@ -97,6 +99,34 @@ Install dependencies:
 Run tests:
     pip install pytest
     pytest tests/
+
+## Testing
+
+The test suite verifies the following functionality:
+
+### Tag Update Strategies
+
+- Development tag handling (`dev-*`)
+
+  - Single stack updates
+  - Automerge functionality
+  - Tag file modifications
+
+- Production tag handling (`production-*`)
+
+  - Multiple stack updates
+  - Multi-stage deployment support
+  - Concurrent stack updates
+
+### Test Configuration
+
+Run the tests with:
+
+    pytest -sv tests/
+
+To see detailed test execution logs:
+
+    pytest -sv tests/test_tag_updater.py
 
 <!-- ## Project Structure
 

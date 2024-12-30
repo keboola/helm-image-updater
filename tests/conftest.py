@@ -8,8 +8,30 @@ Fixtures:
     sample_tag_yaml: Creates a temporary tag.yaml file structure
 """
 
+import json
 import pytest
 import yaml
+
+
+@pytest.fixture
+def github_context(tmp_path):
+    """Creates a github_context.json file for testing."""
+    context = {
+        "server_url": "https://github.com",
+        "repository": "keboola/kbc-stacks",
+        "ref_name": "main",
+        "run_id": "12345",
+        "actor": "test-user",
+        "workflow_ref": "test-workflow",
+        "run_number": "1",
+        "event": {"inputs": {"automerge": "true", "dry-run": "false"}},
+    }
+
+    context_file = tmp_path / "github_context.json"
+    with context_file.open("w", encoding="utf-8") as f:
+        json.dump(context, f)
+
+    return context_file
 
 
 @pytest.fixture

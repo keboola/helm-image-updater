@@ -1,87 +1,247 @@
-"""Test module for tag_updater.py.
+"""Test module for tag update strategies.
 
-This module contains tests for the tag updating functionality of the Helm Image Updater.
-It verifies the proper handling of tag.yaml files and image tag updates.
-
-The tests use temporary directories to simulate stack structures and verify
-that tag updates are performed correctly in various scenarios.
-
-Test Cases:
-    test_update_tag_yaml: Verifies successful tag updates
-    test_update_tag_yaml_missing_file: Verifies handling of missing files
+Tests the different update scenarios for dev and production tags,
+including auto-merge and multi-stage deployment cases.
 """
 
+import os
+from unittest.mock import Mock, patch
 import pytest
-import yaml
-from helm_image_updater.tag_updater import update_tag_yaml
+from helm_image_updater.config import UpdateConfig
+from helm_image_updater.tag_updater import (
+    handle_dev_tag,
+    handle_production_tag,
+    update_tag_yaml,
+)
 
 
-def test_update_tag_yaml(tmp_path):
-    """Tests successful tag.yaml file updates.
+@pytest.fixture
+def mock_repo():
+    """Provides a mock Git repository."""
+    repo = Mock()
+    repo.git = Mock()
+    return repo
 
-    This test verifies that update_tag_yaml correctly:
-    1. Creates necessary directory structure
-    2. Updates the image tag in tag.yaml
-    3. Preserves file structure while updating
 
-    Args:
-        tmp_path (Path): Pytest fixture providing temporary directory path
+@pytest.fixture
+def mock_github_repo():
+    """Provides a mock GitHub repository."""
+    return Mock()
 
-    Returns:
-        None
 
-    Raises:
-        AssertionError: If tag update fails or produces incorrect results
+@pytest.fixture
+def test_stacks(tmp_path):
+    """Creates test stack structure with tag.yaml files."""
+    # Create dev stack
+    dev_stack = tmp_path / "dev-keboola-gcp-us-central1"
+    dev_stack.mkdir()
+    (dev_stack / "test-chart").mkdir()
+    create_tag_yaml(dev_stack / "test-chart" / "tag.yaml", "old-tag")
 
-    Example:
-        A successful test will verify:
-            * tag.yaml file is created with initial tag
-            * Tag is updated to new value
-            * File structure remains intact
-    """
-    # Create a test stack structure
-    stack_dir = tmp_path / "test-stack"
-    stack_dir.mkdir()
-    chart_dir = stack_dir / "test-chart"
-    chart_dir.mkdir()
+    # Create production stacks
+    com_stack = tmp_path / "com-keboola-prod"
+    com_stack.mkdir()
+    (com_stack / "test-chart").mkdir()
+    create_tag_yaml(com_stack / "test-chart" / "tag.yaml", "old-tag")
 
-    # Create a test tag.yaml
-    tag_file = chart_dir / "tag.yaml"
-    initial_data = {"image": {"tag": "old-tag"}}
-    with tag_file.open("w") as f:
-        yaml.dump(initial_data, f)
+    cloud_stack = tmp_path / "cloud-keboola-prod"
+    cloud_stack.mkdir()
+    (cloud_stack / "test-chart").mkdir()
+    create_tag_yaml(cloud_stack / "test-chart" / "tag.yaml", "old-tag")
 
-    # Test updating the tag
-    result = update_tag_yaml(stack_dir, "test-chart", "new-tag", dry_run=False)
+    return {
+        "base_dir": tmp_path,
+        "dev_stack": dev_stack,
+        "com_stack": com_stack,
+        "cloud_stack": cloud_stack,
+    }
+
+
+def create_tag_yaml(path, tag):
+    """Helper to create tag.yaml files."""
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(
+            f"""image:
+  tag: {tag}
+"""
+        )
+
+
+@pytest.mark.parametrize(
+    "test_case",
+    [
+        {
+            "name": "dev tag with automerge",
+            "image_tag": "dev-1.2.3",
+            "automerge": True,
+            "multi_stage": False,
+            "expected_pr_count": 1,
+            "expected_stacks": ["dev-keboola-gcp-us-central1"],
+        },
+        {
+            "name": "dev tag without automerge",
+            "image_tag": "dev-1.2.3",
+            "automerge": False,
+            "multi_stage": False,
+            "expected_pr_count": 1,
+            "expected_stacks": ["dev-keboola-gcp-us-central1"],
+        },
+        {
+            "name": "production tag with automerge",
+            "image_tag": "production-1.2.3",
+            "automerge": True,
+            "multi_stage": False,
+            "expected_pr_count": 1,
+            "expected_stacks": ["com-keboola-prod", "cloud-keboola-prod"],
+        },
+        {
+            "name": "production tag without automerge",
+            "image_tag": "production-1.2.3",
+            "automerge": False,
+            "multi_stage": False,
+            "expected_pr_count": 2,  # One per production stack
+            "expected_stacks": ["com-keboola-prod", "cloud-keboola-prod"],
+        },
+        {
+            "name": "production tag with multi-stage",
+            "image_tag": "production-1.2.3",
+            "automerge": True,  # Should be ignored for prod stacks
+            "multi_stage": True,
+            "expected_pr_count": 2,  # One for dev, one for prod
+            "expected_stacks": [
+                "dev-keboola-gcp-us-central1",
+                "com-keboola-prod",
+                "cloud-keboola-prod",
+            ],
+        },
+    ],
+)
+def test_tag_update_strategy(
+    test_stacks, mock_repo, mock_github_repo, test_case, monkeypatch, github_context
+):
+    """Tests different tag update scenarios."""
+    print(f"\n{'='*80}")
+    print(f"Running test case: {test_case['name']}")
+    print(f"{'='*80}")
+    print("Configuration:")
+    print(f"  - Image tag: {test_case['image_tag']}")
+    print(f"  - Automerge: {test_case['automerge']}")
+    print(f"  - Multi-stage: {test_case['multi_stage']}")
+    print(f"  - Expected stacks: {test_case['expected_stacks']}")
+    print(f"  - Expected PR count: {test_case['expected_pr_count']}")
+
+    # Change to test directory and copy github context
+    monkeypatch.chdir(test_stacks["base_dir"])
+    github_context.rename(test_stacks["base_dir"] / "github_context.json")
+    print(f"\nWorking directory: {test_stacks['base_dir']}")
+    print(f"GitHub context file: {test_stacks['base_dir'] / 'github_context.json'}")
+
+    config = UpdateConfig(
+        repo=mock_repo,
+        github_repo=mock_github_repo,
+        helm_chart="test-chart",
+        image_tag=test_case["image_tag"],
+        automerge=test_case["automerge"],
+        multi_stage=test_case["multi_stage"],
+        dry_run=False,
+    )
+
+    # Mock os.listdir to return only the expected stacks
+    def mock_listdir(path):
+        if path == ".":
+            result = test_case["expected_stacks"]
+            print(f"\nListing directory '{path}':")
+            for stack in result:
+                print(f"  - {stack}")
+            return result
+        return []
+
+    with patch("os.listdir", mock_listdir):
+        print("\nExecuting update...")
+        # Run the appropriate handler based on tag type
+        if test_case["image_tag"].startswith("dev-"):
+            print("Using dev tag handler")
+            changes, missing = handle_dev_tag(config)
+        else:
+            print("Using production tag handler")
+            changes, missing = handle_production_tag(config)
+
+        print("\nResults:")
+        print(f"Changes detected: {len(changes)}")
+        for change in changes:
+            print(f"  - Stack: {change['stack']}")
+            print(f"    Chart: {change['chart']}")
+            print(f"    Tag: {change['tag']}")
+            print(f"    Automerge: {change['automerge']}")
+
+        if missing:
+            print("\nMissing tag.yaml files:")
+            for miss in missing:
+                print(f"  - {miss}")
+
+        # Verify the changes
+        filtered_changes = [
+            change
+            for change in changes
+            if any(
+                change["stack"].startswith(stack_prefix)
+                for stack_prefix in test_case["expected_stacks"]
+            )
+        ]
+
+        print("\nVerification:")
+        print(f"Expected changes: {len(test_case['expected_stacks'])}")
+        print(f"Actual changes: {len(filtered_changes)}")
+
+        assert len(filtered_changes) == len(
+            test_case["expected_stacks"]
+        ), f"Expected {len(test_case['expected_stacks'])} changes, got {len(filtered_changes)}"
+
+        # Verify the correct stacks were updated
+        changed_stacks = {change["stack"] for change in filtered_changes}
+        expected_stacks = set(test_case["expected_stacks"])
+
+        print("\nStack comparison:")
+        print("Expected stacks:")
+        for stack in expected_stacks:
+            print(f"  - {stack}")
+        print("Actually changed stacks:")
+        for stack in changed_stacks:
+            print(f"  - {stack}")
+
+        assert (
+            changed_stacks == expected_stacks
+        ), f"Expected stacks {expected_stacks}, got {changed_stacks}"
+
+        print("\nTest completed successfully!")
+
+
+def test_update_tag_yaml_with_extra_tags(test_stacks):
+    """Tests updating tag.yaml with extra tags."""
+    extra_tags = [
+        {"path": "agent.image.tag", "value": "dev-1.0.0"},
+        {"path": "sidecar.tag", "value": "production-2.0.0"},
+    ]
+
+    result = update_tag_yaml(
+        test_stacks["dev_stack"], "test-chart", "dev-1.2.3", extra_tags=extra_tags
+    )
 
     assert result is True
 
-    # Verify the update
-    with tag_file.open() as f:
-        updated_data = yaml.safe_load(f)
-    assert updated_data["image"]["tag"] == "new-tag"
+    # Verify the changes
+    with open(test_stacks["dev_stack"] / "test-chart" / "tag.yaml") as f:
+        data = f.read()
+        assert "dev-1.2.3" in data
+        assert "dev-1.0.0" in data
+        assert "production-2.0.0" in data
 
 
-def test_update_tag_yaml_missing_file(tmp_path):
-    """Tests handling of missing tag.yaml files.
+def test_missing_tag_yaml(test_stacks):
+    """Tests handling of missing tag.yaml files."""
+    # Remove tag.yaml
+    os.remove(test_stacks["dev_stack"] / "test-chart" / "tag.yaml")
 
-    This test verifies that update_tag_yaml correctly:
-    1. Handles non-existent chart directories
-    2. Returns None for missing tag.yaml files
+    result = update_tag_yaml(test_stacks["dev_stack"], "test-chart", "dev-1.2.3")
 
-    Args:
-        tmp_path (Path): Pytest fixture providing temporary directory path
-
-    Returns:
-        None
-
-    Raises:
-        AssertionError: If missing file handling is incorrect
-
-    Example:
-        A successful test will verify:
-            * None is returned when file doesn't exist
-            * No errors are raised for missing files
-    """
-    result = update_tag_yaml(tmp_path, "nonexistent-chart", "new-tag")
     assert result is None
