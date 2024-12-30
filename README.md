@@ -15,9 +15,21 @@ A Python tool for automating image tag updates across Helm charts in different K
 
 ## Installation
 
+### From GitHub Release
+
+You can install the latest release directly from GitHub:
+
+    pip install https://github.com/keboola/helm-image-updater/releases/latest/download/helm_image_updater-*.tar.gz
+
+Or a specific version:
+
+    pip install https://github.com/keboola/helm-image-updater/releases/download/v0.0.1/helm_image_updater-0.0.1.tar.gz
+
+### From Source
+
 Clone the repository:
 
-    git clone https://github.com/helm-image-updater/helm-image-updater.git
+    git clone https://github.com/keboola/helm-image-updater.git
     cd helm-image-updater
 
 Install the package:
@@ -47,32 +59,129 @@ Optional:
 ### Command Line Examples
 
 Basic usage:
-    HELM_CHART=my-chart IMAGE_TAG=dev-1.0.0 GH_TOKEN=xxx helm-image-updater
+
+    HELM_CHART=dummy-service IMAGE_TAG=dev-b10536c41180e420eaf083451a1ddee132f512c6 GH_TOKEN=xxx helm-image-updater
 
 With extra tags:
-    HELM_CHART=my-chart \
-    IMAGE_TAG=dev-1.0.0 \
+
+    HELM_CHART=dummy-service \
+    IMAGE_TAG=dev-b10536c41180e420eaf083451a1ddee132f512c6 \
     EXTRA_TAG1="agent.image.tag:dev-2.0.0" \
     GH_TOKEN=xxx \
     helm-image-updater
 
 Dry run:
-    DRY_RUN=true HELM_CHART=my-chart IMAGE_TAG=dev-1.0.0 GH_TOKEN=xxx helm-image-updater
 
-### Docker Usage
+    DRY_RUN=true HELM_CHART=dummy-service IMAGE_TAG=dev-b10536c41180e420eaf083451a1ddee132f512c6 GH_TOKEN=xxx helm-image-updater
 
-    docker run --rm \
-      -e HELM_CHART=my-chart \
-      -e IMAGE_TAG=dev-1.0.0 \
-      -e GH_TOKEN=xxx \
-      ghcr.io/yourusername/helm-image-updater:latest
+### GitHub Actions
+
+Minimal usage example:
+
+```yaml
+- uses: "keboola/helm-image-updater@main"
+  with:
+    helm-chart: "dummy-service"
+    image-tag: "dev-b10536c41180e420eaf083451a1ddee132f512c6"
+    automerge: "true"
+    dry-run: "false"
+    multi-stage: "false"
+    extra-tag1: "agent.image.tag:dev-2.0.0"
+    extra-tag2: "messenger.image.tag:dev-2.0.0"
+```
+
+Full example:
+
+```yaml
+name: "Update service image tag"
+run-name: "Update image tag ${{ inputs.helm-chart }}@${{ inputs.image-tag }} ${{ inputs.extra-tag1 }} ${{ inputs.extra-tag2 }}"
+on:
+  workflow_dispatch:
+    inputs:
+      helm-chart:
+        description: "The Helm chart to update"
+        required: true
+        type: string
+      image-tag:
+        description: "Updates image.tag in tag.yaml If not set, extra tags must be specified."
+        required: false
+        type: string
+        default: ''
+      automerge:
+        description: "Automatically merge PRs"
+        required: false
+        type: boolean
+        default: true
+      dry-run:
+        description: "Do a dry run"
+        required: false
+        type: boolean
+        default: false
+      multi-stage:
+        description: "Enable multi-stage deployment (auto-merge dev, manual prod)"
+        required: false
+        type: boolean
+        default: false
+      extra-tag1:
+        description: "Extra tag 1 to update to tag.yaml, value in format path.in.yaml:value"
+        required: false
+        type: string
+        default: ''
+      extra-tag2:
+        description: "Extra tag 2 to update to tag.yaml, value in format path.in.yaml:value"
+        required: false
+        type: string
+        default: ''
+      metadata:
+        description: "Base64 encoded JSON with trigger metadata"
+        required: false
+        type: string
+        default: ''
+
+jobs:
+  update-helm-chart-image-tag:
+    name: Update image tag ${{ inputs.helm-chart }}@${{ inputs.image-tag }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate a token
+        id: app-token
+        uses: actions/create-github-app-token@v1.11.0
+        with:
+          app-id: "1032649"
+          private-key: ${{ secrets.GITOPS_KBC_STACKS_ACTIONS_APP_PVK }}
+          owner: ${{ github.repository_owner }}
+          repositories: "sre-playground"
+
+      - uses: actions/checkout@v4.2.1
+        name: Checkout repository
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          ref: "main"
+
+      - uses: qoomon/actions--setup-git@v1.1.1
+        with:
+          user: bot
+
+      - uses: keboola/helm-image-updater@main
+        with:
+          helm-chart: ${{ inputs.helm-chart }}
+          image-tag: ${{ inputs.image-tag }}
+          automerge: ${{ inputs.automerge }}
+          dry-run: ${{ inputs.dry-run }}
+          multi-stage: ${{ inputs.multi-stage }}
+          extra-tag1: ${{ inputs.extra-tag1 }}
+          extra-tag2: ${{ inputs.extra-tag2 }}
+          metadata: ${{ inputs.metadata }}
+          github-token: ${{ steps.app-token.outputs.token }}
+
+```
 
 ## Tag Format
 
 Image tags must follow these formats:
 
-- Development: `dev-*` (e.g., `dev-1.0.0`)
-- Production: `production-*` (e.g., `production-1.0.0`)
+- Development: `dev-*` (e.g., `dev-b10536c41180e420eaf083451a1ddee132f512c6`)
+- Production: `production-*` (e.g., `production-b10536c41180e420eaf083451a1ddee132f512c6`)
 
 ## Stack Types
 
@@ -89,14 +198,17 @@ When `MULTI_STAGE=true`:
 ## Development
 
 Create virtual environment:
+
     python -m venv .venv
-    source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+    source .venv/bin/activate
 
 Install dependencies:
+
     pip install -r requirements.txt
     pip install -e .
 
 Run tests:
+
     pip install pytest
     pytest tests/
 
@@ -128,19 +240,22 @@ To see detailed test execution logs:
 
     pytest -sv tests/test_tag_updater.py
 
-<!-- ## Project Structure
+## Project Structure
 
-helm-image-updater/
-├── helm_image_updater/
-│   ├── __init__.py
-│   ├── cli.py           # Main entry point
-│   ├── config.py        # Configuration settings
-│   ├── exceptions.py    # Custom exceptions
-│   ├── git_operations.py # Git-related operations
-│   ├── pr_manager.py    # Pull request management
-│   ├── tag_updater.py   # Core tag update logic
-│   └── utils.py         # Utility functions
-├── tests/
-│   └── test_tag_updater.py
-├── requirements.txt
-└── setup.py -->
+    helm-image-updater/
+    ├── helm_image_updater/
+    │   ├── __init__.py
+    │   ├── cli.py              # Main entry point
+    │   ├── config.py           # Configuration settings
+    │   ├── exceptions.py       # Custom exceptions
+    │   ├── git_operations.py   # Git-related operations
+    │   ├── pr_manager.py       # Pull request management
+    │   ├── tag_updater.py      # Core tag update logic
+    │   └── utils.py            # Utility functions
+    ├── tests/
+    │   ├── conftest.py         # Pytest configuration and fixtures
+    │   ├── test_git_operations.py   # Tests for Git operations
+    │   ├── test_pr_manager.py      # Tests for PR creation and management
+    │   └── test_tag_updater.py     # Tests for tag update logic
+    ├── requirements.txt
+    └── setup.py
