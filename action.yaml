@@ -38,6 +38,12 @@ inputs:
 runs:
   using: 'composite'
   steps:
+    - name: Save GitHub context
+      shell: bash
+      env:
+        GITHUB_CONTEXT: ${{ toJson(github) }}
+      run: echo "$GITHUB_CONTEXT" > github_context.json
+
     - uses: actions/setup-python@v5.2.0
       with:
         python-version: '3.x'

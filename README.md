@@ -59,14 +59,6 @@ With extra tags:
 Dry run:
     DRY_RUN=true HELM_CHART=my-chart IMAGE_TAG=dev-1.0.0 GH_TOKEN=xxx helm-image-updater
 
-### Docker Usage
-
-    docker run --rm \
-      -e HELM_CHART=my-chart \
-      -e IMAGE_TAG=dev-1.0.0 \
-      -e GH_TOKEN=xxx \
-      ghcr.io/yourusername/helm-image-updater:latest
-
 ## Tag Format
 
 Image tags must follow these formats:
