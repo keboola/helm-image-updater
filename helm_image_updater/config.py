@@ -25,7 +25,7 @@ from github.Repository import Repository
 DEV_STACKS = ["dev-keboola-gcp-us-central1"]
 IGNORED_FOLDERS = {".venv", "aws", ".git", ".github"}
 GITHUB_REPO = os.getenv("GITHUB_REPOSITORY", "keboola/kbc-stacks")
-GITHUB_BRANCH = os.getenv("GITHUB_REF_NAME", "main")
+GITHUB_BRANCH = "main"
 
 
 @dataclass

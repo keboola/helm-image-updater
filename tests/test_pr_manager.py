@@ -154,8 +154,9 @@ def test_production_tag_multi_stage(mock_config, capsys):
     print(f"{'='*80}")
 
     mock_config.image_tag = "production-1.2.3"
-    mock_config.automerge = True  # Should be ignored for production in multi-stage
+    mock_config.automerge = True
     mock_config.multi_stage = True
+    mock_config.helm_chart = "dummy-service"
 
     print("\nConfiguration:")
     print(f"  - Helm chart: {mock_config.helm_chart}")
@@ -165,27 +166,42 @@ def test_production_tag_multi_stage(mock_config, capsys):
 
     # First PR - dev stack (should auto-merge)
     print("\nCreating PR for dev stack...")
-    create_pr(mock_config, "test-branch-dev", "[multi-stage] Update dev stack")
+    create_pr(
+        mock_config,
+        "test-branch-dev",
+        f"[multi-stage] [test sync] {mock_config.helm_chart}@{mock_config.image_tag} in stacks",
+    )
 
     captured = capsys.readouterr()
     print("\nCaptured output (dev):")
     print(captured.out)
 
     print("\nVerifying dev PR creation...")
-    assert "Would create PR: '[multi-stage] Update dev stack'" in captured.out
+    # Verify dev PR title and auto-merge
+    assert (
+        f"Would create PR: '[multi-stage] [test sync] {mock_config.helm_chart}@{mock_config.image_tag} in stacks'"
+        in captured.out
+    )
     assert "and automatically merge it" in captured.out
 
     # Second PR - production stacks (should NOT auto-merge)
     print("\nCreating PR for production stacks...")
-    mock_config.automerge = False  # Force automerge off for production PR
-    create_pr(mock_config, "test-branch-prod", "[multi-stage] Update production stacks")
+    create_pr(
+        mock_config,
+        "test-branch-prod",
+        f"[multi-stage] [production sync] {mock_config.helm_chart}@{mock_config.image_tag} in all stacks",
+    )
 
     captured = capsys.readouterr()
     print("\nCaptured output (production):")
     print(captured.out)
 
     print("\nVerifying production PR creation...")
-    assert "Would create PR: '[multi-stage] Update production stacks'" in captured.out
+    # Verify production PR title and no auto-merge
+    assert (
+        f"Would create PR: '[multi-stage] [production sync] {mock_config.helm_chart}@{mock_config.image_tag} in all stacks'"
+        in captured.out
+    )
     assert "without auto-merging" in captured.out
 
     print("Test completed successfully!")
