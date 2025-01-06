@@ -93,7 +93,9 @@ def create_pr_body(config: UpdateConfig) -> str:
             )
         except (IOError, json.JSONDecodeError) as e:
             print(f"Warning: Failed to read GitHub context: {e}")
-            trigger_info = "### 🔄 Manual Trigger\n- **Source:** GitHub Actions workflow"
+            trigger_info = (
+                "### 🔄 Manual Trigger\n- **Source:** GitHub Actions workflow"
+            )
 
     # Combine all sections with clear separation
     return (
@@ -110,20 +112,20 @@ def create_pr(
     pr_title: str,
     base: str = GITHUB_BRANCH,
 ):
-    """Create a pull request for the changes.
-
-    Args:
-        config (UpdateConfig): The configuration object.
-        branch_name (str): The name of the branch to create the PR from.
-        pr_title (str): The title of the pull request.
-        base (str, optional): The base branch for the PR. Defaults to GITHUB_BRANCH constant.
-    """
-    base = base or GITHUB_BRANCH
+    """Create a pull request for the changes."""
     pr_body = create_pr_body(config)
+
+    # Determine if this PR should be auto-merged
+    should_automerge = config.automerge
+    if config.multi_stage:
+        # In multi-stage mode:
+        # - Auto-merge only dev PRs (those with [test sync])
+        # - Never auto-merge production PRs (those with [production sync])
+        should_automerge = "[test sync]" in pr_title
 
     if config.dry_run:
         automerge_status = (
-            "and automatically merge it" if config.automerge else "without auto-merging"
+            "and automatically merge it" if should_automerge else "without auto-merging"
         )
         print(f"Would create PR: '{pr_title}' {automerge_status}")
         print("PR body would be:")
@@ -131,9 +133,12 @@ def create_pr(
     else:
         config.repo.git.push("origin", branch_name)
         pr = config.github_repo.create_pull(
-            title=pr_title, body=pr_body, head=branch_name, base=base
+            title=pr_title,
+            body=pr_body,
+            head=branch_name,
+            base=base,  # Always use main as base
         )
-        if config.automerge:
+        if should_automerge:
             for _ in range(3):  # Retry up to 3 times
                 try:
                     pr.merge()

@@ -46,7 +46,7 @@ runs:
 
     - uses: actions/setup-python@v5.2.0
       with:
-        python-version: '3.x'
+        python-version: '3.13'
 
     - uses: robinraju/release-downloader@v1.9
       with:

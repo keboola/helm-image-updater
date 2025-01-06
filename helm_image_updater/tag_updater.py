@@ -20,7 +20,7 @@ import os
 from pathlib import Path
 import yaml
 import dpath
-from .config import UpdateConfig, DEV_STACKS
+from .config import UpdateConfig, DEV_STACKS, GITHUB_BRANCH, IGNORED_FOLDERS
 from .pr_manager import create_pr
 from .utils import random_suffix
 
@@ -168,49 +168,13 @@ def update_production_stacks(config: UpdateConfig):
     print("Updating all stacks (production- tag)")
     if not config.automerge:
         return update_all_stacks_separately(config)
-    return update_all_stacks_single_pr(config)
 
-
-def update_stack(config: UpdateConfig, stack: str):
-    """Update a single stack with the new image tag."""
-    result = update_tag_yaml(
-        stack,
-        config.helm_chart,
-        config.image_tag,
-        extra_tags=config.extra_tags,
-        dry_run=config.dry_run,
-    )
-    if result:
-        return {
-            "stack": stack,
-            "chart": config.helm_chart,
-            "tag": config.image_tag,
-            "automerge": False,
-        }
-    return None
-
-
-def update_all_stacks_separately(config: UpdateConfig):
-    """Update all stacks individually."""
-    changes = []
-    missing_tags = []
-    for stack in os.listdir("."):
-        if os.path.isdir(stack):
-            result = update_stack(config, stack)
-            if result:
-                changes.append(result)
-    return changes, missing_tags
-
-
-def update_all_stacks_single_pr(config: UpdateConfig):
-    """Update all stacks in a single PR."""
-    changes = []
-    missing_tags = []
     branch_name = f"{config.helm_chart}-all-stacks-{config.image_tag}-{random_suffix()}"
-
     if not config.dry_run:
         config.repo.git.checkout("-b", branch_name)
 
+    changes = []
+    missing_tags = []
     changes_made = False
     for stack in os.listdir("."):
         if os.path.isdir(stack):
@@ -230,18 +194,13 @@ def update_all_stacks_single_pr(config: UpdateConfig):
                         "stack": stack,
                         "chart": config.helm_chart,
                         "tag": config.image_tag,
-                        "automerge": True,
+                        "automerge": config.automerge,
                     }
                 )
 
     if changes_made:
-        image_tag_str = (
-            f"@{config.image_tag}"
-            if config.image_tag
-            else ""
-            + "".join(
-                f" {tag['path']}@{tag['value']}" for tag in (config.extra_tags or [])
-            )
+        image_tag_str = (f"@{config.image_tag}" if config.image_tag else "") + "".join(
+            f" {tag['path']}@{tag['value']}" for tag in (config.extra_tags or [])
         )
         if not config.dry_run:
             config.repo.git.commit(
@@ -249,17 +208,136 @@ def update_all_stacks_single_pr(config: UpdateConfig):
                 f"Update {config.helm_chart} to {image_tag_str} in all stacks",
             )
         pr_title_prefix = (
-            "[multi-stage] [production sync]"
-            if config.multi_stage
-            else "[production sync]"
+            "[multi-stage] [prod sync]" if config.multi_stage else "[prod sync]"
         )
         create_pr(
             config,
             branch_name,
-            f"{pr_title_prefix} {config.helm_chart}{image_tag_str} in all stacks",
+            f"{pr_title_prefix} {config.helm_chart}{image_tag_str}",
         )
     else:
         print("No changes needed for production stacks.")
+
+    return changes, missing_tags
+
+
+def update_stack(config: UpdateConfig, stack_folder: str):
+    """Update a single stack with the new image tag."""
+    if not config.dry_run:
+        config.repo.git.checkout(GITHUB_BRANCH)
+        config.repo.git.pull("origin", GITHUB_BRANCH)  # Pull from main branch
+
+    branch_name = (
+        f"{config.helm_chart}-{stack_folder}-{config.image_tag}-{random_suffix()}"
+    )
+    if not config.dry_run:
+        config.repo.git.checkout("-b", branch_name)
+
+    tag_file_path = f"{stack_folder}/{config.helm_chart}/tag.yaml"
+    if update_tag_yaml(
+        stack_folder,
+        config.helm_chart,
+        config.image_tag,
+        extra_tags=config.extra_tags,
+        dry_run=config.dry_run,
+    ):
+        if not config.dry_run:
+            config.repo.git.add(tag_file_path)
+            config.repo.git.commit(
+                "-m",
+                f"Update {config.helm_chart} to {config.image_tag} in {stack_folder}",
+            )
+            pr_title_prefix = (
+                "[multi-stage] [test sync]" if config.multi_stage else "[test sync]"
+            )
+            create_pr(
+                config,
+                branch_name,
+                f"{pr_title_prefix} {config.helm_chart}@{config.image_tag} in {stack_folder}",
+            )
+        return {
+            "stack": stack_folder,
+            "chart": config.helm_chart,
+            "tag": config.image_tag,
+            "automerge": config.automerge,
+        }
+    return None
+
+
+def update_all_stacks_separately(config: UpdateConfig):
+    """Update all stacks individually."""
+    changes = []
+    missing_tags = []
+    for stack in os.listdir("."):
+        if os.path.isdir(stack):
+            result = update_stack(config, stack)
+            if result:
+                changes.append(result)
+    return changes, missing_tags
+
+
+def update_all_stacks_single_pr(config: UpdateConfig, exclude_stacks: list = None):
+    """Update all stacks in a single PR."""
+    changes = []
+    missing_tags = []
+    branch_name = f"{config.helm_chart}-all-stacks-{config.image_tag}-{random_suffix()}"
+
+    if not config.dry_run:
+        config.repo.git.checkout(GITHUB_BRANCH)
+        config.repo.git.pull("origin", GITHUB_BRANCH)  # Pull from main branch
+        config.repo.git.checkout("-b", branch_name)
+
+    exclude_stacks = exclude_stacks or []
+    changes_made = False
+    for stack in os.listdir("."):
+        if (
+            os.path.isdir(stack)
+            and stack not in IGNORED_FOLDERS
+            and stack not in exclude_stacks
+        ):
+            result = update_tag_yaml(
+                stack,
+                config.helm_chart,
+                config.image_tag,
+                extra_tags=config.extra_tags,
+                dry_run=config.dry_run,
+            )
+            if result is None:
+                missing_tags.append(stack)
+            elif result:
+                changes.append(
+                    {
+                        "stack": stack,
+                        "chart": config.helm_chart,
+                        "tag": config.image_tag,
+                        "automerge": config.automerge,
+                    }
+                )
+                changes_made = True
+                if not config.dry_run:
+                    config.repo.git.add(f"{stack}/{config.helm_chart}/tag.yaml")
+
+    if changes_made:
+        image_tag_str = (f"@{config.image_tag}" if config.image_tag else "") + "".join(
+            f" {tag['path']}@{tag['value']}" for tag in (config.extra_tags or [])
+        )
+        if not config.dry_run:
+            config.repo.git.commit(
+                "-m",
+                f"Update {config.helm_chart} to {image_tag_str} in {'production stacks' if exclude_stacks else 'all stacks'}",
+            )
+        pr_title_prefix = (
+            "[multi-stage] [prod sync]" if config.multi_stage else "[prod sync]"
+        )
+        create_pr(
+            config,
+            branch_name,
+            f"{pr_title_prefix} {config.helm_chart}{image_tag_str}{' in production stacks' if exclude_stacks else ''}".strip(),
+        )
+    else:
+        print(
+            f"No changes needed for {'production stacks' if exclude_stacks else 'all stacks'}"
+        )
 
     return changes, missing_tags
 
@@ -270,5 +348,47 @@ def handle_dev_tag(config: UpdateConfig):
 
 
 def handle_production_tag(config: UpdateConfig):
-    """Handle production tag updates."""
-    return update_production_stacks(config)
+    """Handle production tag updates.
+
+    When multi_stage is True:
+    - Creates and auto-merges a PR for dev stacks
+    - Creates a single PR (without auto-merge) for production stacks
+
+    When multi_stage is False:
+    - Follows standard production stack update logic based on automerge setting
+    """
+    if not config.multi_stage:
+        return update_production_stacks(config)
+
+    # First update dev stacks with auto-merge (always auto-merge in multi-stage)
+    dev_config = UpdateConfig(
+        repo=config.repo,
+        github_repo=config.github_repo,
+        helm_chart=config.helm_chart,
+        image_tag=config.image_tag,
+        automerge=True,  # Always auto-merge dev in multi-stage
+        dry_run=config.dry_run,
+        multi_stage=config.multi_stage,
+        extra_tags=config.extra_tags,
+    )
+    dev_changes, dev_missing = update_dev_stack(dev_config)
+
+    # Then update production stacks in a single PR without auto-merge
+    prod_config = UpdateConfig(
+        repo=config.repo,
+        github_repo=config.github_repo,
+        helm_chart=config.helm_chart,
+        image_tag=config.image_tag,
+        automerge=False,  # Never auto-merge prod in multi-stage
+        dry_run=config.dry_run,
+        multi_stage=config.multi_stage,
+        extra_tags=config.extra_tags,
+    )
+    prod_changes, prod_missing = update_all_stacks_single_pr(
+        prod_config, exclude_stacks=DEV_STACKS
+    )
+
+    # Combine results
+    changes = dev_changes + prod_changes
+    missing_tags = list(set(dev_missing + prod_missing))
+    return changes, missing_tags
