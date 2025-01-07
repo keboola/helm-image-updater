@@ -59,6 +59,7 @@ def main():
         dry_run = os.environ.get("DRY_RUN", "false").lower() == "true"
         multi_stage = os.environ.get("MULTI_STAGE", "false").lower() == "true"
         target_path = os.environ.get("TARGET_PATH", ".")
+        commit_sha = os.environ.get("COMMIT_PIPELINE_SHA", "false").lower() == "true"
 
         # Change to target directory if specified
         if target_path != ".":
@@ -159,6 +160,7 @@ def main():
             dry_run=dry_run,
             multi_stage=multi_stage,
             extra_tags=extra_tags if extra_tags else None,
+            commit_sha=commit_sha,
         )
 
         # Group extra tags by value and join paths with the same value
