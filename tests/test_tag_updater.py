@@ -30,6 +30,18 @@ def mock_github_repo():
 
 
 @pytest.fixture
+def mock_metadata():
+    """Provides mock trigger metadata."""
+    return {
+        "source": {
+            "repository": "test-repo",
+            "repository_url": "https://github.com/test/repo",
+            "sha": "abcdef1234567890abcdef1234567890abcdef12",
+        }
+    }
+
+
+@pytest.fixture
 def test_stacks(tmp_path):
     """Creates test stack structure with tag.yaml files."""
     # Create dev stack
@@ -245,3 +257,108 @@ def test_missing_tag_yaml(test_stacks):
     result = update_tag_yaml(test_stacks["dev_stack"], "test-chart", "dev-1.2.3")
 
     assert result is None
+
+
+def test_update_tag_yaml_with_commit_sha(test_stacks, mock_metadata):
+    """Tests updating tag.yaml with commit SHA."""
+    print("\n" + "="*80)
+    print("Running test: Update tag.yaml with commit SHA")
+    print("="*80)
+    print("\nConfiguration:")
+    print("  - Stack: dev-keboola-gcp-us-central1")
+    print("  - Chart: test-chart")
+    print("  - New tag: dev-1.2.3")
+    print("  - Commit SHA enabled: True")
+    print(f"  - Mock SHA: {mock_metadata['source']['sha']}")
+
+    with patch('helm_image_updater.tag_updater.get_trigger_metadata', return_value=mock_metadata):
+        print("\nExecuting update...")
+        result = update_tag_yaml(
+            test_stacks["dev_stack"],
+            "test-chart",
+            "dev-1.2.3",
+            commit_sha=True
+        )
+
+        assert result is True
+        print("\nVerifying changes...")
+
+        # Verify the changes
+        with open(test_stacks["dev_stack"] / "test-chart" / "tag.yaml") as f:
+            data = f.read()
+            print("\nResulting tag.yaml content:")
+            print(data)
+            assert "dev-1.2.3" in data, "New tag should be present in tag.yaml"
+            assert "abcdef1" in data, "Short SHA should be present in tag.yaml"
+
+        print("\nTest completed successfully!")
+
+
+def test_update_tag_yaml_with_commit_sha_disabled(test_stacks, mock_metadata):
+    """Tests that commit SHA is not added when disabled."""
+    print("\n" + "="*80)
+    print("Running test: Update tag.yaml with commit SHA disabled")
+    print("="*80)
+    print("\nConfiguration:")
+    print("  - Stack: dev-keboola-gcp-us-central1")
+    print("  - Chart: test-chart")
+    print("  - New tag: dev-1.2.3")
+    print("  - Commit SHA enabled: False")
+    print(f"  - Mock SHA: {mock_metadata['source']['sha']}")
+
+    with patch('helm_image_updater.tag_updater.get_trigger_metadata', return_value=mock_metadata):
+        print("\nExecuting update...")
+        result = update_tag_yaml(
+            test_stacks["dev_stack"],
+            "test-chart",
+            "dev-1.2.3",
+            commit_sha=False
+        )
+
+        assert result is True
+        print("\nVerifying changes...")
+
+        # Verify the changes
+        with open(test_stacks["dev_stack"] / "test-chart" / "tag.yaml") as f:
+            data = f.read()
+            print("\nResulting tag.yaml content:")
+            print(data)
+            assert "dev-1.2.3" in data, "New tag should be present in tag.yaml"
+            assert "abcdef1" not in data, "SHA should not be present when disabled"
+
+        print("\nTest completed successfully!")
+
+
+def test_update_tag_yaml_with_commit_sha_no_metadata(test_stacks):
+    """Tests handling when metadata is not available."""
+    print("\n" + "="*80)
+    print("Running test: Update tag.yaml with commit SHA but no metadata")
+    print("="*80)
+    print("\nConfiguration:")
+    print("  - Stack: dev-keboola-gcp-us-central1")
+    print("  - Chart: test-chart")
+    print("  - New tag: dev-1.2.3")
+    print("  - Commit SHA enabled: True")
+    print("  - Mock SHA: None (empty metadata)")
+
+    with patch('helm_image_updater.tag_updater.get_trigger_metadata', return_value={}):
+        print("\nExecuting update...")
+        result = update_tag_yaml(
+            test_stacks["dev_stack"],
+            "test-chart",
+            "dev-1.2.3",
+            commit_sha=True
+        )
+
+        assert result is True, "Should still update the tag even without metadata"
+        print("\nVerifying changes...")
+
+        # Verify the changes
+        with open(test_stacks["dev_stack"] / "test-chart" / "tag.yaml") as f:
+            data = f.read()
+            print("\nResulting tag.yaml content:")
+            print(data)
+            assert "dev-1.2.3" in data, "New tag should be present in tag.yaml"
+            assert "commit_sha" not in data, "SHA field should not be present without metadata"
+
+        print("\nTest completed successfully!")

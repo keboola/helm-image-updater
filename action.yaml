@@ -19,6 +19,10 @@ inputs:
     description: 'Enable multi-stage deployment'
     required: false
     default: 'false'
+  commit-sha:
+    description: 'Store commit SHA in tag.yaml'
+    required: false
+    default: 'false'
   extra-tag1:
     description: 'Extra tag 1 to update (format: path.in.yaml:value)'
     required: false
@@ -65,6 +69,7 @@ runs:
         EXTRA_TAG2: ${{ inputs.extra-tag2 }}
         METADATA: ${{ inputs.metadata }}
         GH_TOKEN: ${{ inputs.github-token }}
+        COMMIT_PIPELINE_SHA: ${{ inputs.commit-sha }}
       run: |
         pip install helm_image_updater-*.tar.gz
         helm-image-updater

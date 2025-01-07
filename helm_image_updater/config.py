@@ -40,3 +40,4 @@ class UpdateConfig:
     dry_run: bool = False
     multi_stage: bool = False
     extra_tags: Optional[List[dict]] = None
+    commit_sha: bool = False

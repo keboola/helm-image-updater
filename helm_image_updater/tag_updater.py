@@ -22,11 +22,16 @@ import yaml
 import dpath
 from .config import UpdateConfig, DEV_STACKS, GITHUB_BRANCH, IGNORED_FOLDERS
 from .pr_manager import create_pr
-from .utils import random_suffix
+from .utils import get_trigger_metadata, random_suffix
 
 
 def update_tag_yaml(
-    stack_folder, helm_chart, image_tag, extra_tags=None, dry_run=False
+    stack_folder,
+    helm_chart,
+    image_tag,
+    extra_tags=None,
+    dry_run=False,
+    commit_sha=False,
 ):
     """Update the tag.yaml file with the new image tag and optional additional tags.
 
@@ -36,7 +41,8 @@ def update_tag_yaml(
         image_tag (str): The new image tag to set.
         extra_tags (list): Optional list of dicts with 'path' and 'value' keys for additional tags.
                           Example: [{'path': 'agent.image.tag', 'value': 'v1.2.3'}]
-        dry_run (bool): Whether to perform a dry run without making actual changes. Defaults to False.
+        dry_run (bool): Whether to perform a dry run without making actual changes.
+        commit_sha (bool): Whether to store commit SHA from metadata in tag.yaml.
 
     Returns:
         bool or None: True if updated, False if unchanged, None if file is missing.
@@ -59,6 +65,20 @@ def update_tag_yaml(
             f"{'Would update' if dry_run else 'Updated'} {stack_folder}/{helm_chart}/tag.yaml from {old_tag} to {image_tag}"
         )
         changes_made = True
+
+    # Add commit SHA if enabled and metadata is available
+    if commit_sha:
+        metadata = get_trigger_metadata()
+        if metadata:
+            source = metadata.get("source", {})
+            if sha := source.get("sha"):
+                short_sha = sha[:7]
+                if not dry_run:
+                    dpath.new(data, "image.commit_sha", short_sha, separator=".")
+                print(
+                    f"{'Would add' if dry_run else 'Added'} commit SHA {short_sha} to {stack_folder}/{helm_chart}/tag.yaml"
+                )
+                changes_made = True
 
     # Process additional tags if provided
     if extra_tags:
@@ -119,6 +139,7 @@ def update_dev_stack(config: UpdateConfig):
                 config.image_tag,
                 extra_tags=config.extra_tags,
                 dry_run=config.dry_run,
+                commit_sha=config.commit_sha,
             ):
                 if not config.dry_run:
                     config.repo.git.add(tag_file_path)
@@ -185,6 +206,7 @@ def update_production_stacks(config: UpdateConfig):
                 config.image_tag,
                 extra_tags=config.extra_tags,
                 dry_run=config.dry_run,
+                commit_sha=config.commit_sha,
             ):
                 if not config.dry_run:
                     config.repo.git.add(tag_file_path)
@@ -240,6 +262,7 @@ def update_stack(config: UpdateConfig, stack_folder: str):
         config.image_tag,
         extra_tags=config.extra_tags,
         dry_run=config.dry_run,
+        commit_sha=config.commit_sha,
     ):
         if not config.dry_run:
             config.repo.git.add(tag_file_path)
@@ -301,6 +324,7 @@ def update_all_stacks_single_pr(config: UpdateConfig, exclude_stacks: list = Non
                 config.image_tag,
                 extra_tags=config.extra_tags,
                 dry_run=config.dry_run,
+                commit_sha=config.commit_sha,
             )
             if result is None:
                 missing_tags.append(stack)
