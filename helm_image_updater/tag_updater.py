@@ -72,11 +72,10 @@ def update_tag_yaml(
         if metadata:
             source = metadata.get("source", {})
             if sha := source.get("sha"):
-                short_sha = sha[:7]
                 if not dry_run:
-                    dpath.new(data, "image.commit_sha", short_sha, separator=".")
+                    dpath.new(data, "image.commit_sha", sha, separator=".")
                 print(
-                    f"{'Would add' if dry_run else 'Added'} commit SHA {short_sha} to {stack_folder}/{helm_chart}/tag.yaml"
+                    f"{'Would add' if dry_run else 'Added'} commit SHA {sha} to {stack_folder}/{helm_chart}/tag.yaml"
                 )
                 changes_made = True
 
