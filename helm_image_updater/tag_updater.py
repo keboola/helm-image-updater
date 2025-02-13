@@ -9,18 +9,26 @@ Functions:
     update_tag_yaml: Updates a single tag.yaml file with new image tags
     update_dev_stack: Handles updates for development stacks
     update_production_stacks: Handles updates for production stacks
+    update_canary_stack: Handles updates for canary stacks
     handle_dev_tag: Orchestrates the dev tag update process
     handle_production_tag: Orchestrates the production tag update process
+    handle_canary_tag: Orchestrates the canary tag update process
 
-The module supports both individual stack updates and batch updates,
-with different strategies for dev and production environments.
+The module supports individual stack updates and batch updates,
+with different strategies for dev, production, and canary environments.
 """
 
 import os
 from pathlib import Path
 import yaml
 import dpath
-from .config import UpdateConfig, DEV_STACKS, GITHUB_BRANCH, IGNORED_FOLDERS
+from .config import (
+    UpdateConfig,
+    DEV_STACKS,
+    CANARY_STACKS,
+    GITHUB_BRANCH,
+    IGNORED_FOLDERS,
+)
 from .pr_manager import create_pr
 from .utils import get_trigger_metadata, random_suffix
 
@@ -103,6 +111,30 @@ def update_tag_yaml(
     return changes_made
 
 
+def is_production_stack(stack: str) -> bool:
+    """Check if a stack is a production stack."""
+    # Get list of canary stacks to exclude
+    canary_stacks = [info["stack"] for info in CANARY_STACKS.values()]
+    return (
+        os.path.isdir(stack)
+        and stack not in IGNORED_FOLDERS
+        and stack not in DEV_STACKS
+        and stack not in canary_stacks
+    )
+
+
+def is_dev_stack(stack: str) -> bool:
+    """Check if a stack is a development stack."""
+    # Get list of canary stacks to exclude
+    canary_stacks = [info["stack"] for info in CANARY_STACKS.values()]
+    return (
+        os.path.isdir(stack)
+        and stack not in IGNORED_FOLDERS
+        and stack in DEV_STACKS
+        and stack not in canary_stacks
+    )
+
+
 def update_dev_stack(config: UpdateConfig):
     """Update all dev stacks with the new image tag.
 
@@ -116,13 +148,11 @@ def update_dev_stack(config: UpdateConfig):
     changes = []
     missing_tags = []
     if not config.automerge:
-        for dev_stack in DEV_STACKS:
-            result = update_stack(
-                config,
-                dev_stack,
-            )
-            if result:
-                changes.append(result)
+        for stack in os.listdir("."):
+            if is_dev_stack(stack):
+                result = update_stack(config, stack)
+                if result:
+                    changes.append(result)
     else:
         branch_name = (
             f"{config.helm_chart}-dev-stacks-{config.image_tag}-{random_suffix()}"
@@ -130,27 +160,28 @@ def update_dev_stack(config: UpdateConfig):
         if not config.dry_run:
             config.repo.git.checkout("-b", branch_name)
         changes_made = False
-        for dev_stack in DEV_STACKS:
-            tag_file_path = f"{dev_stack}/{config.helm_chart}/tag.yaml"
-            if update_tag_yaml(
-                dev_stack,
-                config.helm_chart,
-                config.image_tag,
-                extra_tags=config.extra_tags,
-                dry_run=config.dry_run,
-                commit_sha=config.commit_sha,
-            ):
-                if not config.dry_run:
-                    config.repo.git.add(tag_file_path)
-                changes_made = True
-                changes.append(
-                    {
-                        "stack": dev_stack,
-                        "chart": config.helm_chart,
-                        "tag": config.image_tag,
-                        "automerge": True,
-                    }
-                )
+        for stack in os.listdir("."):
+            if is_dev_stack(stack):
+                tag_file_path = f"{stack}/{config.helm_chart}/tag.yaml"
+                if update_tag_yaml(
+                    stack,
+                    config.helm_chart,
+                    config.image_tag,
+                    extra_tags=config.extra_tags,
+                    dry_run=config.dry_run,
+                    commit_sha=config.commit_sha,
+                ):
+                    if not config.dry_run:
+                        config.repo.git.add(tag_file_path)
+                    changes_made = True
+                    changes.append(
+                        {
+                            "stack": stack,
+                            "chart": config.helm_chart,
+                            "tag": config.image_tag,
+                            "automerge": True,
+                        }
+                    )
         if changes_made:
             image_tag_str = (
                 f"@{config.image_tag}" if config.image_tag else ""
@@ -186,7 +217,7 @@ def update_production_stacks(config: UpdateConfig):
         tuple: A tuple containing a list of changes and a list of missing tag.yaml files.
     """
     print("Updating all stacks (production- tag)")
-    if not config.automerge:
+    if not config.automerge and not config.multi_stage:
         return update_all_stacks_separately(config)
 
     branch_name = f"{config.helm_chart}-all-stacks-{config.image_tag}-{random_suffix()}"
@@ -196,8 +227,9 @@ def update_production_stacks(config: UpdateConfig):
     changes = []
     missing_tags = []
     changes_made = False
+
     for stack in os.listdir("."):
-        if os.path.isdir(stack):
+        if is_production_stack(stack):
             tag_file_path = f"{stack}/{config.helm_chart}/tag.yaml"
             if update_tag_yaml(
                 stack,
@@ -226,7 +258,7 @@ def update_production_stacks(config: UpdateConfig):
         if not config.dry_run:
             config.repo.git.commit(
                 "-m",
-                f"Update {config.helm_chart} to {image_tag_str} in all stacks",
+                f"Update {config.helm_chart} to {image_tag_str} in production stacks",
             )
         pr_title_prefix = (
             "[multi-stage] [prod sync]" if config.multi_stage else "[prod sync]"
@@ -290,8 +322,9 @@ def update_all_stacks_separately(config: UpdateConfig):
     """Update all stacks individually."""
     changes = []
     missing_tags = []
+
     for stack in os.listdir("."):
-        if os.path.isdir(stack):
+        if is_production_stack(stack):
             result = update_stack(config, stack)
             if result:
                 changes.append(result)
@@ -365,6 +398,94 @@ def update_all_stacks_single_pr(config: UpdateConfig, exclude_stacks: list = Non
     return changes, missing_tags
 
 
+def update_canary_stack(config: UpdateConfig):
+    """Update canary stack with the new image tag.
+
+    Args:
+        config (UpdateConfig): The configuration object.
+
+    Returns:
+        tuple: A tuple containing a list of changes and a list of missing tag.yaml files.
+    """
+    # Determine which canary stack to update based on image tag prefix
+    canary_type = None
+    target_stack = None
+    base_branch = None
+
+    for prefix, stack_info in CANARY_STACKS.items():
+        if config.image_tag.startswith(prefix):
+            canary_type = prefix
+            target_stack = stack_info["stack"]
+            base_branch = stack_info["base_branch"]
+            break
+
+    if not canary_type:
+        print("Not a canary tag, skipping canary stack update")
+        return [], []
+
+    print(f"Updating canary stack {target_stack} ({canary_type} tag)")
+
+    # Create a new branch for the changes
+    branch_name = (
+        f"{config.helm_chart}-{canary_type}-{config.image_tag}-{random_suffix()}"
+    )
+    if not config.dry_run:
+        # Checkout and pull the correct base branch
+        config.repo.git.checkout(base_branch)
+        config.repo.git.pull("origin", base_branch)
+        config.repo.git.checkout("-b", branch_name)
+
+    changes = []
+    missing_tags = []
+    tag_file_path = f"{target_stack}/{config.helm_chart}/tag.yaml"
+
+    if update_tag_yaml(
+        target_stack,
+        config.helm_chart,
+        config.image_tag,
+        extra_tags=config.extra_tags,
+        dry_run=config.dry_run,
+        commit_sha=config.commit_sha,
+    ):
+        if not config.dry_run:
+            config.repo.git.add(tag_file_path)
+            image_tag_str = (
+                f"@{config.image_tag}" if config.image_tag else ""
+            ) + "".join(
+                f" {tag['path']}@{tag['value']}" for tag in (config.extra_tags or [])
+            )
+            config.repo.git.commit(
+                "-m",
+                f"Update {config.helm_chart} to {image_tag_str} in {target_stack}",
+            )
+            # Push to the correct base branch
+            config.repo.git.push("origin", branch_name)
+
+        changes.append(
+            {
+                "stack": target_stack,
+                "chart": config.helm_chart,
+                "tag": config.image_tag,
+                "automerge": True,  # Always auto-merge canary updates
+            }
+        )
+
+        # Create PR with auto-merge and correct base branch
+        pr_title = (
+            f"[canary sync] {config.helm_chart}@{config.image_tag} in {target_stack}"
+        )
+        create_pr(
+            config,
+            branch_name,
+            pr_title,
+            base=base_branch,  # Use the canary-specific base branch
+        )
+    else:
+        print(f"No changes needed for {target_stack}")
+
+    return changes, missing_tags
+
+
 def handle_dev_tag(config: UpdateConfig):
     """Handle dev tag updates."""
     return update_dev_stack(config)
@@ -393,6 +514,7 @@ def handle_production_tag(config: UpdateConfig):
         dry_run=config.dry_run,
         multi_stage=config.multi_stage,
         extra_tags=config.extra_tags,
+        commit_sha=config.commit_sha,
     )
     dev_changes, dev_missing = update_dev_stack(dev_config)
 
@@ -406,12 +528,16 @@ def handle_production_tag(config: UpdateConfig):
         dry_run=config.dry_run,
         multi_stage=config.multi_stage,
         extra_tags=config.extra_tags,
+        commit_sha=config.commit_sha,
     )
-    prod_changes, prod_missing = update_all_stacks_single_pr(
-        prod_config, exclude_stacks=DEV_STACKS
-    )
+    prod_changes, prod_missing = update_production_stacks(prod_config)
 
     # Combine results
     changes = dev_changes + prod_changes
     missing_tags = list(set(dev_missing + prod_missing))
     return changes, missing_tags
+
+
+def handle_canary_tag(config: UpdateConfig):
+    """Handle canary tag updates."""
+    return update_canary_stack(config)

@@ -19,7 +19,7 @@ import json
 from pathlib import Path
 from time import sleep
 from github.GithubException import GithubException
-from .config import UpdateConfig, GITHUB_BRANCH
+from .config import UpdateConfig, GITHUB_BRANCH, CANARY_STACKS
 from .utils import get_trigger_metadata
 
 
@@ -122,6 +122,9 @@ def create_pr(
         # - Auto-merge only dev PRs (those with [test sync])
         # - Never auto-merge production PRs (those with [production sync])
         should_automerge = "[test sync]" in pr_title
+    elif "[canary sync]" in pr_title:
+        # Always auto-merge canary PRs
+        should_automerge = True
 
     if config.dry_run:
         automerge_status = (
@@ -136,7 +139,7 @@ def create_pr(
             title=pr_title,
             body=pr_body,
             head=branch_name,
-            base=base,  # Always use main as base
+            base=base,
         )
         if should_automerge:
             for _ in range(3):  # Retry up to 3 times

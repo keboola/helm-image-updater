@@ -28,9 +28,9 @@ def mock_config(tmp_path, github_context, monkeypatch):
 
 def test_dev_tag_with_automerge(mock_config, capsys):
     """Test PR creation for dev tag with automerge enabled."""
-    print(f"\n{'='*80}")
+    print(f"\n{'=' * 80}")
     print("Running test: dev tag with automerge")
-    print(f"{'='*80}")
+    print(f"{'=' * 80}")
 
     mock_config.image_tag = "dev-1.2.3"
     mock_config.automerge = True
@@ -58,9 +58,9 @@ def test_dev_tag_with_automerge(mock_config, capsys):
 
 def test_dev_tag_without_automerge(mock_config, capsys):
     """Test PR creation for dev tag without automerge."""
-    print(f"\n{'='*80}")
+    print(f"\n{'=' * 80}")
     print("Running test: dev tag without automerge")
-    print(f"{'='*80}")
+    print(f"{'=' * 80}")
 
     mock_config.image_tag = "dev-1.2.3"
     mock_config.automerge = False
@@ -87,9 +87,9 @@ def test_dev_tag_without_automerge(mock_config, capsys):
 
 def test_production_tag_with_automerge(mock_config, capsys):
     """Test PR creation for production tag with automerge."""
-    print(f"\n{'='*80}")
+    print(f"\n{'=' * 80}")
     print("Running test: production tag with automerge")
-    print(f"{'='*80}")
+    print(f"{'=' * 80}")
 
     mock_config.image_tag = "production-1.2.3"
     mock_config.automerge = True
@@ -117,9 +117,9 @@ def test_production_tag_with_automerge(mock_config, capsys):
 
 def test_production_tag_without_automerge(mock_config, capsys):
     """Test PR creation for production tag without automerge."""
-    print(f"\n{'='*80}")
+    print(f"\n{'=' * 80}")
     print("Running test: production tag without automerge")
-    print(f"{'='*80}")
+    print(f"{'=' * 80}")
 
     mock_config.image_tag = "production-1.2.3"
     mock_config.automerge = False
@@ -149,9 +149,9 @@ def test_production_tag_without_automerge(mock_config, capsys):
 
 def test_production_tag_multi_stage(mock_config, capsys):
     """Test PR creation for production tag with multi-stage enabled."""
-    print(f"\n{'='*80}")
+    print(f"\n{'=' * 80}")
     print("Running test: production tag with multi-stage")
-    print(f"{'='*80}")
+    print(f"{'=' * 80}")
 
     mock_config.image_tag = "production-1.2.3"
     mock_config.automerge = True
@@ -203,5 +203,40 @@ def test_production_tag_multi_stage(mock_config, capsys):
         in captured.out
     )
     assert "without auto-merging" in captured.out
+
+    print("Test completed successfully!")
+
+
+def test_canary_tag_automerge(mock_config, capsys):
+    """Test PR creation for canary tag (should always auto-merge)."""
+    print(f"\n{'=' * 80}")
+    print("Running test: canary tag with auto-merge")
+    print(f"{'=' * 80}")
+
+    mock_config.image_tag = "canary-orion-1.2.3"
+    mock_config.automerge = False  # Even if set to False, canary should auto-merge
+    mock_config.multi_stage = False
+
+    print("\nConfiguration:")
+    print(f"  - Helm chart: {mock_config.helm_chart}")
+    print(f"  - Image tag: {mock_config.image_tag}")
+    print(f"  - Automerge: {mock_config.automerge}")
+    print(f"  - Multi-stage: {mock_config.multi_stage}")
+
+    print("\nCreating PR...")
+    create_pr(
+        mock_config,
+        "test-branch",
+        "[canary sync] Update canary stack",
+        base="canary-orion",
+    )
+
+    captured = capsys.readouterr()
+    print("\nCaptured output:")
+    print(captured.out)
+
+    print("\nVerifying PR creation...")
+    assert "Would create PR: '[canary sync] Update canary stack'" in captured.out
+    assert "and automatically merge it" in captured.out
 
     print("Test completed successfully!")

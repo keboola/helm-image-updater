@@ -7,6 +7,7 @@ the behavior of the image updating process.
 
 Constants:
     DEV_STACKS: List of stack names considered as development stacks
+    CANARY_STACKS: Dictionary of canary stack names and their corresponding tag prefixes
     IGNORED_FOLDERS: Set of folder names to ignore during processing
     GITHUB_REPO: Name of the GitHub repository (from environment)
     GITHUB_BRANCH: Name of the GitHub branch (from environment)
@@ -23,6 +24,13 @@ from github.Repository import Repository
 
 # Constants
 DEV_STACKS = ["dev-keboola-gcp-us-central1"]
+CANARY_STACKS = {
+    "canary-orion": {
+        "stack": "dev-keboola-canary-orion",
+        "base_branch": "canary-orion",
+    },
+    "canary-ursa": {"stack": "dev-keboola-canary-ursa", "base_branch": "canary-ursa"},
+}
 IGNORED_FOLDERS = {".venv", "aws", ".git", ".github"}
 GITHUB_REPO = os.getenv("GITHUB_REPOSITORY", "keboola/kbc-stacks")
 GITHUB_BRANCH = "main"
