@@ -57,6 +57,22 @@ runs:
         repository: "keboola/helm-image-updater"
         latest: true
 
+    - name: Configure git and fetch branches
+      shell: bash
+      run: |
+        git config --global --add safe.directory "*"
+        git fetch --all --prune
+        
+        # Setup canary branches
+        for branch in canary-orion canary-ursa; do
+          if git ls-remote --heads origin $branch | grep -q "$branch"; then
+            git checkout -B $branch origin/$branch
+          fi
+        done
+        
+        # Return to original branch
+        git checkout ${{ github.ref_name }}
+
     - name: Update image tags and create PRs
       shell: bash
       env:

@@ -120,7 +120,11 @@ def create_tag_yaml(path, tag):
             "automerge": True,
             "multi_stage": False,
             "expected_pr_count": 1,
-            "expected_stacks": ["com-keboola-prod", "cloud-keboola-prod"],
+            "expected_stacks": [
+                "dev-keboola-gcp-us-central1",
+                "com-keboola-prod",
+                "cloud-keboola-prod"
+            ],
             "expected_base": "main",
         },
         {
@@ -128,8 +132,12 @@ def create_tag_yaml(path, tag):
             "image_tag": "production-1.2.3",
             "automerge": False,
             "multi_stage": False,
-            "expected_pr_count": 2,  # One per production stack
-            "expected_stacks": ["com-keboola-prod", "cloud-keboola-prod"],
+            "expected_pr_count": 3,  # One per stack (2 prod + 1 dev)
+            "expected_stacks": [
+                "dev-keboola-gcp-us-central1",
+                "com-keboola-prod",
+                "cloud-keboola-prod"
+            ],
             "expected_base": "main",
         },
         {

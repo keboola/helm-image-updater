@@ -228,8 +228,9 @@ def update_production_stacks(config: UpdateConfig):
     missing_tags = []
     changes_made = False
 
+    # When not in multi-stage mode, update both dev and production stacks
     for stack in os.listdir("."):
-        if is_production_stack(stack):
+        if not config.multi_stage and is_dev_stack(stack) or is_production_stack(stack):
             tag_file_path = f"{stack}/{config.helm_chart}/tag.yaml"
             if update_tag_yaml(
                 stack,
@@ -258,7 +259,7 @@ def update_production_stacks(config: UpdateConfig):
         if not config.dry_run:
             config.repo.git.commit(
                 "-m",
-                f"Update {config.helm_chart} to {image_tag_str} in production stacks",
+                f"Update {config.helm_chart} to {image_tag_str} in all stacks",
             )
         pr_title_prefix = (
             "[multi-stage] [prod sync]" if config.multi_stage else "[prod sync]"
@@ -269,7 +270,7 @@ def update_production_stacks(config: UpdateConfig):
             f"{pr_title_prefix} {config.helm_chart}{image_tag_str}",
         )
     else:
-        print("No changes needed for production stacks.")
+        print("No changes needed for stacks.")
 
     return changes, missing_tags
 
@@ -324,7 +325,7 @@ def update_all_stacks_separately(config: UpdateConfig):
     missing_tags = []
 
     for stack in os.listdir("."):
-        if is_production_stack(stack):
+        if not config.multi_stage and is_dev_stack(stack) or is_production_stack(stack):
             result = update_stack(config, stack)
             if result:
                 changes.append(result)
