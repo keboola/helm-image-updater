@@ -34,11 +34,12 @@ import sys
 from pathlib import Path
 from git import Repo
 from github import Github
-from .config import UpdateConfig, GITHUB_REPO, IGNORED_FOLDERS
+from .config import UpdateConfig, GITHUB_REPO, IGNORED_FOLDERS, CANARY_STACKS
 from .exceptions import ImageUpdaterError
 from .tag_updater import (
     handle_dev_tag,
     handle_production_tag,
+    handle_canary_tag,
 )
 from .utils import print_dry_run_summary
 
@@ -87,11 +88,11 @@ def main():
 
         # Validate image_tag format if it's set
         if image_tag.strip():
-            if not (
-                image_tag.startswith("dev-") or image_tag.startswith("production-")
-            ):
+            valid_prefixes = ["dev-", "production-"] + list(CANARY_STACKS.keys())
+            if not any(image_tag.startswith(prefix) for prefix in valid_prefixes):
                 print(
-                    "Invalid image tag format. Must start with 'dev-' or 'production-'."
+                    "Invalid image tag format. Must start with 'dev-', 'production-', "
+                    f"or one of {', '.join(CANARY_STACKS.keys())}."
                 )
                 sys.exit(1)
 
@@ -170,11 +171,20 @@ def main():
         extra_tags_contains_production = config.extra_tags and any(
             tag["value"].startswith("production-") for tag in config.extra_tags
         )
+        extra_tags_contains_canary = config.extra_tags and any(
+            any(image_tag.startswith(prefix) for prefix in CANARY_STACKS.keys())
+            for tag in config.extra_tags
+        )
 
         if image_tag.startswith("dev-") or extra_tags_contains_dev:
             changes, missing_tags = handle_dev_tag(config)
         elif image_tag.startswith("production-") or extra_tags_contains_production:
             changes, missing_tags = handle_production_tag(config)
+        elif (
+            any(image_tag.startswith(prefix) for prefix in CANARY_STACKS.keys())
+            or extra_tags_contains_canary
+        ):
+            changes, missing_tags = handle_canary_tag(config)
         else:
             print("Invalid image tag format. Must start with 'dev-' or 'production-'.")
             sys.exit(1)

@@ -46,11 +46,11 @@ Required:
 
 - `HELM_CHART`: Name of the Helm chart to update
 - `GH_TOKEN`: GitHub access token for authentication
-- `IMAGE_TAG`: New image tag to set (must start with 'dev-' or 'production-')
+- `IMAGE_TAG`: New image tag to set (must start with 'dev-', 'production-', 'canary-orion-', or 'canary-ursa-')
 
 Optional:
 
-- `AUTOMERGE`: Whether to automatically merge PRs (default: "true")
+- `AUTOMERGE`: Whether to automatically merge PRs (default: "true", note: canary updates are always auto-merged)
 - `DRY_RUN`: Whether to perform a dry run (default: "false")
 - `MULTI_STAGE`: Enable multi-stage deployment (default: "false")
 - `TARGET_PATH`: Path to the directory containing the stacks (default: ".")
@@ -182,11 +182,33 @@ Image tags must follow these formats:
 
 - Development: `dev-*` (e.g., `dev-b10536c41180e420eaf083451a1ddee132f512c6`)
 - Production: `production-*` (e.g., `production-b10536c41180e420eaf083451a1ddee132f512c6`)
+- Canary: `canary-*` (e.g., `canary-orion-b10536c41180e420eaf083451a1ddee132f512c6`, `canary-ursa-b10536c41180e420eaf083451a1ddee132f512c6`)
 
 ## Stack Types
 
 - **Development Stacks**: Only updated with `dev-` tags
 - **Production Stacks**: Updated with `production-` tags
+- **Canary Stacks**: Updated with `canary-*` tags, always auto-merged and target their specific base branches
+
+## Stack Update Behavior
+
+### Development Updates
+
+- Updates only development stacks
+- Auto-merge behavior follows the `automerge` setting
+
+### Production Updates
+
+- Updates production stacks
+- Auto-merge behavior follows the `automerge` setting
+- In multi-stage mode, creates separate PRs for dev and prod stacks
+
+### Canary Updates
+
+- Updates only the specific canary stack matching the tag prefix
+- Always auto-merges regardless of the `automerge` setting
+- Uses stack-specific base branches (e.g., `canary-orion`, `canary-ursa`)
+- Supports extra tags for complex configurations
 
 ## Multi-Stage Deployment
 
@@ -229,6 +251,13 @@ The test suite verifies the following functionality:
   - Multiple stack updates
   - Multi-stage deployment support
   - Concurrent stack updates
+
+- Canary tag handling (`canary-*`)
+
+  - Stack-specific updates
+  - Automatic auto-merge
+  - Base branch targeting
+  - Extra tag support
 
 ### Test Configuration
 

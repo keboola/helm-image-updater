@@ -19,7 +19,7 @@ import json
 from pathlib import Path
 from time import sleep
 from github.GithubException import GithubException
-from .config import UpdateConfig, GITHUB_BRANCH
+from .config import UpdateConfig, GITHUB_BRANCH, CANARY_STACKS
 from .utils import get_trigger_metadata
 
 
@@ -122,6 +122,9 @@ def create_pr(
         # - Auto-merge only dev PRs (those with [test sync])
         # - Never auto-merge production PRs (those with [production sync])
         should_automerge = "[test sync]" in pr_title
+    elif "[canary sync]" in pr_title:
+        # Always auto-merge canary PRs
+        should_automerge = True
 
     if config.dry_run:
         automerge_status = (
@@ -136,20 +139,34 @@ def create_pr(
             title=pr_title,
             body=pr_body,
             head=branch_name,
-            base=base,  # Always use main as base
+            base=base,
         )
         if should_automerge:
-            for _ in range(3):  # Retry up to 3 times
+            max_retries = 5
+            retry_delay = 5  # seconds
+            for attempt in range(max_retries):
                 try:
+                    # Check if PR is mergeable
+                    pr.update()  # Refresh PR data
+                    if pr.mergeable is None:
+                        print(f"PR mergeability not yet determined, waiting {retry_delay} seconds... (attempt {attempt + 1}/{max_retries})")
+                        sleep(retry_delay)
+                        continue
+                    elif not pr.mergeable:
+                        print(f"PR is not mergeable due to conflicts: {pr.html_url}")
+                        break
+                    
                     pr.merge()
                     print(f"PR created and automatically merged: {pr.html_url}")
                     break
                 except GithubException as e:
-                    if e.status == 405 and "Merge already in progress" in e.data.get(
-                        "message", ""
-                    ):
-                        print("Merge already in progress, retrying...")
-                        sleep(5)  # Wait for 5 seconds before retrying
+                    if e.status == 405 and "not mergeable" in str(e.data.get("message", "")).lower():
+                        if attempt < max_retries - 1:
+                            print(f"PR not yet mergeable, waiting {retry_delay} seconds... (attempt {attempt + 1}/{max_retries})")
+                            sleep(retry_delay)
+                        else:
+                            print(f"Failed to merge PR after {max_retries} attempts: {pr.html_url}")
+                            raise
                     else:
                         raise  # Re-raise if it's a different error
         else:
