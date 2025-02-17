@@ -160,12 +160,15 @@ def create_pr(
                     print(f"PR created and automatically merged: {pr.html_url}")
                     break
                 except GithubException as e:
-                    if e.status == 405 and "not mergeable" in str(e.data.get("message", "")).lower():
+                    error_message = str(e.data.get("message", "")).lower()
+                    if e.status == 405 and ("not mergeable" in error_message or "merge already in progress" in error_message):
                         if attempt < max_retries - 1:
-                            print(f"PR not yet mergeable, waiting {retry_delay} seconds... (attempt {attempt + 1}/{max_retries})")
+                            print(f"PR merge failed ({error_message}), waiting {retry_delay} seconds... (attempt {attempt + 1}/{max_retries})")
                             sleep(retry_delay)
                         else:
                             print(f"Failed to merge PR after {max_retries} attempts: {pr.html_url}")
+                            if "merge already in progress" in error_message:
+                                print("Note: PR might still be merged by GitHub's background process")
                             raise
                     else:
                         raise  # Re-raise if it's a different error
