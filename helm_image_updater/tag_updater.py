@@ -302,20 +302,28 @@ def update_stack(config: UpdateConfig, stack_folder: str):
                 "-m",
                 f"Update {config.helm_chart} to {config.image_tag} in {stack_folder}",
             )
-            pr_title_prefix = (
-                "[multi-stage] [test sync]" if config.multi_stage else "[test sync]"
-            )
+
+            # Determine PR title prefix based on stack type
+            if is_dev_stack(stack_folder):
+                pr_title_prefix = (
+                    "[multi-stage] [test sync]" if config.multi_stage else "[test sync]"
+                )
+            else:
+                pr_title_prefix = (
+                    "[multi-stage] [prod sync]" if config.multi_stage else "[prod sync]"
+                )
+
             create_pr(
                 config,
                 branch_name,
                 f"{pr_title_prefix} {config.helm_chart}@{config.image_tag} in {stack_folder}",
             )
-        return {
-            "stack": stack_folder,
-            "chart": config.helm_chart,
-            "tag": config.image_tag,
-            "automerge": config.automerge,
-        }
+            return {
+                "stack": stack_folder,
+                "chart": config.helm_chart,
+                "tag": config.image_tag,
+                "automerge": config.automerge,
+            }
     return None
 
 
@@ -325,7 +333,9 @@ def update_all_stacks_separately(config: UpdateConfig):
     missing_tags = []
 
     for stack in os.listdir("."):
-        if not config.multi_stage and is_dev_stack(stack) or is_production_stack(stack):
+        if not config.multi_stage and (
+            is_dev_stack(stack) or is_production_stack(stack)
+        ):
             result = update_stack(config, stack)
             if result:
                 changes.append(result)
