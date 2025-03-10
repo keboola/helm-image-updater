@@ -63,7 +63,7 @@ def main():
         multi_stage = os.environ.get("MULTI_STAGE", "false").lower() == "true"
         target_path = os.environ.get("TARGET_PATH", ".")
         commit_sha = os.environ.get("COMMIT_PIPELINE_SHA", "false").lower() == "true"
-        override_stack = os.environ.get("OVERRIDE_STACK", "").strip() or None
+        override_stack = os.environ.get("OVERRIDE_STACK", "").strip()
 
         # Change to target directory if specified
         if target_path != ".":
