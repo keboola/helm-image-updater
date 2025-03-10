@@ -65,6 +65,8 @@ def main():
         commit_sha = os.environ.get("COMMIT_PIPELINE_SHA", "false").lower() == "true"
         override_stack = os.environ.get("OVERRIDE_STACK", "").strip()
 
+        print(f"OVERRIDE stack (dump): {os.environ.get("OVERRIDE_STACK")}")
+
         # Change to target directory if specified
         if target_path != ".":
             print(f"Changing to target directory: {target_path}")

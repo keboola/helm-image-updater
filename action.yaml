@@ -94,3 +94,6 @@ runs:
       run: |
         pip install helm_image_updater-*.tar.gz
         helm-image-updater
+
+    - name: Debug
+      run: echo "Override stack: ${{ inputs.override-stack }}"
