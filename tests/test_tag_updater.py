@@ -539,10 +539,7 @@ def test_update_stack_by_id(test_stacks, mock_repo, mock_github_repo, monkeypatc
     
     # Apply the mocks
     monkeypatch.setattr("helm_image_updater.tag_updater.create_pr", mock_create_pr)
-    mock_repo.git.checkout = lambda branch_name: print(f"Would checkout branch: {branch_name}")
-    mock_repo.git.add = lambda file_path: print(f"Would add file: {file_path}")
-    mock_repo.git.commit = lambda m, message: print(f"Would commit with message: {message}")
-    
+   
     # Create test config
     from helm_image_updater.config import UpdateConfig
     config = UpdateConfig(
