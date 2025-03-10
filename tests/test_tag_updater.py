@@ -13,6 +13,7 @@ from helm_image_updater.tag_updater import (
     handle_production_tag,
     handle_canary_tag,
     update_tag_yaml,
+    update_stack_by_id,
 )
 
 
@@ -516,3 +517,65 @@ def test_canary_tag_with_extra_tags(
     assert changes[0]["automerge"] is True, "Canary updates should always auto-merge"
 
     print("\nTest completed successfully!")
+
+
+def test_update_stack_by_id(test_stacks, mock_repo, mock_github_repo, monkeypatch):
+    """Test updating a stack by ID."""
+    print("\n" + "=" * 80)
+    print("Running test: Update stack by ID")
+    print("=" * 80)
+    
+    from helm_image_updater.tag_updater import update_stack_by_id
+    
+    # Mock the create_pr function to avoid actual PR creation
+    pr_created = []
+    def mock_create_pr(config, branch_name, pr_title, base="main"):
+        print(f"Would create PR: {pr_title} (branch: {branch_name}, base: {base})")
+        pr_created.append({
+            "branch": branch_name,
+            "title": pr_title,
+            "base": base
+        })
+    
+    # Apply the mocks
+    monkeypatch.setattr("helm_image_updater.tag_updater.create_pr", mock_create_pr)
+    mock_repo.git.checkout = lambda branch_name: print(f"Would checkout branch: {branch_name}")
+    mock_repo.git.add = lambda file_path: print(f"Would add file: {file_path}")
+    mock_repo.git.commit = lambda m, message: print(f"Would commit with message: {message}")
+    
+    # Create test config
+    from helm_image_updater.config import UpdateConfig
+    config = UpdateConfig(
+        repo=mock_repo,
+        github_repo=mock_github_repo,
+        helm_chart="test-chart",
+        image_tag="dev-1.2.3",
+        automerge=True,
+    )
+    
+    # Test updating a dev stack with a dev tag
+    print("\nUpdating dev stack with dev tag:")
+    result = update_stack_by_id(config, "dev-keboola-gcp-us-central1")
+    assert result is not None, "Should return update information"
+    assert result["stack"] == "dev-keboola-gcp-us-central1"
+    assert len(pr_created) == 1, "Should create a PR"
+    
+    # Test updating a production stack with a production tag
+    print("\nUpdating production stack with production tag:")
+    config.image_tag = "production-1.2.3"
+    pr_created.clear()
+    result = update_stack_by_id(config, "com-keboola-prod")
+    assert result is not None, "Should return update information"
+    assert result["stack"] == "com-keboola-prod"
+    assert len(pr_created) == 1, "Should create a PR"
+    
+    # Test incompatible tag and stack
+    print("\nTesting incompatible tag and stack:")
+    config.image_tag = "dev-1.2.3"
+    pr_created.clear()
+    result = update_stack_by_id(config, "com-keboola-prod")
+    assert result is None, "Should return None for incompatible tag and stack"
+    assert len(pr_created) == 0, "Should not create a PR"
+    
+
+
