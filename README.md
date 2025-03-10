@@ -54,6 +54,7 @@ Optional:
 - `DRY_RUN`: Whether to perform a dry run (default: "false")
 - `MULTI_STAGE`: Enable multi-stage deployment (default: "false")
 - `TARGET_PATH`: Path to the directory containing the stacks (default: ".")
+- `OVERRIDE_STACK`: Stack ID to override normal selection logic (default: None)
 - `EXTRA_TAG1`, `EXTRA_TAG2`: Additional tags to update (format: "path:value")
 
 ### Command Line Examples
@@ -86,6 +87,7 @@ Minimal usage example:
     automerge: "true"
     dry-run: "false"
     multi-stage: "false"
+    override-stack: "dev-keboola-gcp-us-central1"
     extra-tag1: "agent.image.tag:dev-2.0.0"
     extra-tag2: "messenger.image.tag:dev-2.0.0"
 ```
@@ -122,6 +124,11 @@ on:
         required: false
         type: boolean
         default: false
+      override-stack:
+        description: "Stack ID to override normal selection logic"
+        required: false
+        type: string
+        default: ''
       extra-tag1:
         description: "Extra tag 1 to update to tag.yaml, value in format path.in.yaml:value"
         required: false
@@ -169,12 +176,11 @@ jobs:
           automerge: ${{ inputs.automerge }}
           dry-run: ${{ inputs.dry-run }}
           multi-stage: ${{ inputs.multi-stage }}
+          override-stack: ${{ inputs.override-stack }}
           extra-tag1: ${{ inputs.extra-tag1 }}
           extra-tag2: ${{ inputs.extra-tag2 }}
           metadata: ${{ inputs.metadata }}
           github-token: ${{ steps.app-token.outputs.token }}
-
-```
 
 ## Tag Format
 

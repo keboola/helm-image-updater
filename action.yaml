@@ -31,6 +31,10 @@ inputs:
     description: 'Extra tag 2 to update (format: path.in.yaml:value)'
     required: false
     default: ''
+  override-stack:
+    description: 'Stack ID to override normal selection logic'
+    required: false
+    default: ''    
   metadata:
     description: 'Base64 encoded JSON with trigger metadata'
     required: false
@@ -83,6 +87,7 @@ runs:
         MULTI_STAGE: ${{ inputs.multi-stage }}
         EXTRA_TAG1: ${{ inputs.extra-tag1 }}
         EXTRA_TAG2: ${{ inputs.extra-tag2 }}
+        OVERRIDE_STACK: ${{ inputs.override-stack }}        
         METADATA: ${{ inputs.metadata }}
         GH_TOKEN: ${{ inputs.github-token }}
         COMMIT_PIPELINE_SHA: ${{ inputs.commit-sha }}
