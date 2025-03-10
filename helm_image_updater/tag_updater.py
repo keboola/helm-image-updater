@@ -576,7 +576,8 @@ def update_stack_by_id(config: UpdateConfig, stack_id: str):
     
 
     # allow only production- tags or dev- tags
-    all_tags = [tag["value"] for tag in config.extra_tags]
+    extra_tags = config.extra_tags or []
+    all_tags = [tag["value"] for tag in extra_tags]
     all_tags.append(config.image_tag)
 
     if not all(tag.startswith("dev-") or tag.startswith("production-") for tag in all_tags):
