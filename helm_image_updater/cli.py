@@ -18,6 +18,7 @@ Environment Variables:
     AUTOMERGE: Whether to automatically merge created PRs (default: "true")
     DRY_RUN: Whether to perform a dry run without making actual changes (default: "false")
     TARGET_PATH: Path to the directory containing the stacks (default: ".")
+    OVERRIDE_STACK: Stack ID to override normal selection logic (default: None)
 
 Usage:
     This script is intended to be run as part of a GitHub Actions workflow.
@@ -40,6 +41,7 @@ from .tag_updater import (
     handle_dev_tag,
     handle_production_tag,
     handle_canary_tag,
+    update_stack_by_id,
 )
 from .utils import print_dry_run_summary
 
@@ -61,6 +63,7 @@ def main():
         multi_stage = os.environ.get("MULTI_STAGE", "false").lower() == "true"
         target_path = os.environ.get("TARGET_PATH", ".")
         commit_sha = os.environ.get("COMMIT_PIPELINE_SHA", "false").lower() == "true"
+        override_stack = os.environ.get("OVERRIDE_STACK", "").strip() or None
 
         # Change to target directory if specified
         if target_path != ".":
@@ -113,6 +116,8 @@ def main():
         print(f"Automerge: {automerge}")
         print(f"Dry run: {dry_run}")
         print(f"Multi-stage deployment: {multi_stage}")
+        if override_stack:
+            print(f"Override stack: {override_stack}")
         if extra_tags:
             print("Extra tags to update:")
             for tag in extra_tags:
@@ -176,7 +181,9 @@ def main():
             for tag in config.extra_tags
         )
 
-        if image_tag.startswith("dev-") or extra_tags_contains_dev:
+        if override_stack:
+            changes, missing_tags = update_stack_by_id(config, override_stack)
+        elif image_tag.startswith("dev-") or extra_tags_contains_dev:
             changes, missing_tags = handle_dev_tag(config)
         elif image_tag.startswith("production-") or extra_tags_contains_production:
             changes, missing_tags = handle_production_tag(config)

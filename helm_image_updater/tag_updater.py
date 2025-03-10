@@ -13,6 +13,7 @@ Functions:
     handle_dev_tag: Orchestrates the dev tag update process
     handle_production_tag: Orchestrates the production tag update process
     handle_canary_tag: Orchestrates the canary tag update process
+    update_stack_by_id: Updates a single selected stack with a new image tag
 
 The module supports individual stack updates and batch updates,
 with different strategies for dev, production, and canary environments.
@@ -552,3 +553,92 @@ def handle_production_tag(config: UpdateConfig):
 def handle_canary_tag(config: UpdateConfig):
     """Handle canary tag updates."""
     return update_canary_stack(config)
+
+
+def update_stack_by_id(config: UpdateConfig, stack_id: str):
+    """Update a single selected stack with the new image tag.
+    
+    This function respects the tag conventions:
+    - dev- tags can only go to dev stacks
+    - production- tags can go to any stack
+    
+    Args:
+        config (UpdateConfig): The configuration object.
+        stack_id (str): The ID of the stack to update.
+        
+    Returns:
+        dict or None: A dictionary with update information if successful, None otherwise.
+    """
+    # Check if the stack exists and is not in ignored folders
+    if not os.path.isdir(stack_id) or stack_id in IGNORED_FOLDERS:
+        print(f"Stack {stack_id} does not exist or is in ignored folders")
+        return None
+    
+
+    # allow only production- tags or dev- tags
+    all_tags = [tag["value"] for tag in config.extra_tags]
+    all_tags.append(config.image_tag)
+
+    if not all(tag.startswith("dev-") or tag.startswith("production-") for tag in all_tags):
+        print("Invalid tag format. Must start with 'dev-' or 'production-'.")
+        return None    
+
+    extra_tags_contains_dev = config.extra_tags and any(
+        tag["value"].startswith("dev-") for tag in config.extra_tags
+    )    
+    
+    # Validate tag and stack compatibility
+    # dev- tags can only go to dev stacks
+    if (config.image_tag.startswith("dev-") or extra_tags_contains_dev) and is_production_stack(stack_id):
+        print(f"Cannot apply dev tag to non-dev stack {stack_id}")
+        return None
+    
+    # Update the tag.yaml file
+    tag_file_path = f"{stack_id}/{config.helm_chart}/tag.yaml"
+    result = update_tag_yaml(
+        stack_id,
+        config.helm_chart,
+        config.image_tag,
+        extra_tags=config.extra_tags,
+        dry_run=config.dry_run,
+        commit_sha=config.commit_sha,
+    )
+    
+    if result is None:
+        print(f"Missing tag.yaml file for {stack_id}/{config.helm_chart}")
+        return None
+    elif not result:
+        print(f"No changes needed for {stack_id}")
+        return None
+    
+    # Create a branch and PR if not in dry run mode
+    if not config.dry_run:
+        # Create a branch for the changes
+        branch_name = f"{config.helm_chart}-{stack_id}-{config.image_tag}-{random_suffix()}"
+        config.repo.git.checkout("-b", branch_name)
+        
+        # Add and commit the changes
+        config.repo.git.add(tag_file_path)
+        
+        image_tag_str = (f"@{config.image_tag}" if config.image_tag else "") + "".join(
+            f" {tag['path']}@{tag['value']}" for tag in (config.extra_tags or [])
+        )
+        
+        config.repo.git.commit(
+            "-m", f"Update {config.helm_chart} to {image_tag_str} in {stack_id}"
+        )
+        
+        # Create PR
+        create_pr(
+            config,
+            branch_name,
+            f"Update {config.helm_chart} to {image_tag_str} in {stack_id}",
+        )
+    
+    # Return update information
+    return {
+        "stack": stack_id,
+        "chart": config.helm_chart,
+        "tag": config.image_tag,
+        "automerge": config.automerge,
+    }
