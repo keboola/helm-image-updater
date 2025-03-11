@@ -572,7 +572,7 @@ def update_stack_by_id(config: UpdateConfig, stack_id: str):
     # Check if the stack exists and is not in ignored folders
     if not os.path.isdir(stack_id) or stack_id in IGNORED_FOLDERS:
         print(f"Stack {stack_id} does not exist or is in ignored folders")
-        return None
+        return [], []
     
 
     # allow only production- tags or dev- tags
@@ -582,7 +582,7 @@ def update_stack_by_id(config: UpdateConfig, stack_id: str):
 
     if not all(tag.startswith("dev-") or tag.startswith("production-") for tag in all_tags):
         print("Invalid tag format. Must start with 'dev-' or 'production-'.")
-        return None    
+        return [], []   
 
     extra_tags_contains_dev = config.extra_tags and any(
         tag["value"].startswith("dev-") for tag in config.extra_tags
@@ -592,7 +592,7 @@ def update_stack_by_id(config: UpdateConfig, stack_id: str):
     # dev- tags can only go to dev stacks
     if (config.image_tag.startswith("dev-") or extra_tags_contains_dev) and is_production_stack(stack_id):
         print(f"Cannot apply dev tag to non-dev stack {stack_id}")
-        return None
+        return [], []
     
     # Update the tag.yaml file
     tag_file_path = f"{stack_id}/{config.helm_chart}/tag.yaml"
@@ -607,10 +607,10 @@ def update_stack_by_id(config: UpdateConfig, stack_id: str):
     
     if result is None:
         print(f"Missing tag.yaml file for {stack_id}/{config.helm_chart}")
-        return None
+        return [], []
     elif not result:
         print(f"No changes needed for {stack_id}")
-        return None
+        return [], []
     
     # Create a branch and PR if not in dry run mode
     if not config.dry_run:
@@ -637,9 +637,9 @@ def update_stack_by_id(config: UpdateConfig, stack_id: str):
         )
     
     # Return update information
-    return {
+    return [{
         "stack": stack_id,
         "chart": config.helm_chart,
         "tag": config.image_tag,
         "automerge": config.automerge,
-    }
+    }], []
