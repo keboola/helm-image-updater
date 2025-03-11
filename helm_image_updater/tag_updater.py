@@ -621,7 +621,7 @@ def update_stack_by_id(config: UpdateConfig, stack_id: str):
         # Add and commit the changes
         config.repo.git.add(tag_file_path)
         
-        image_tag_str = (f"@{config.image_tag}" if config.image_tag else "") + "".join(
+        image_tag_str = (f"{config.image_tag}" if config.image_tag else "") + "".join(
             f" {tag['path']}@{tag['value']}" for tag in (config.extra_tags or [])
         )
         
