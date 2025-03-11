@@ -1,50 +1,50 @@
-name: 'Update Service Image Tag'
-description: 'Updates image tags in Helm charts and creates PRs'
+name: "Update Service Image Tag"
+description: "Updates image tags in Helm charts and creates PRs"
 inputs:
   helm-chart:
-    description: 'The Helm chart to update'
+    description: "The Helm chart to update"
     required: true
   image-tag:
-    description: 'Updates image.tag in tag.yaml'
+    description: "Updates image.tag in tag.yaml"
     required: true
   automerge:
-    description: 'Automatically merge PRs'
+    description: "Automatically merge PRs"
     required: false
-    default: 'true'
+    default: "true"
   dry-run:
-    description: 'Do a dry run'
+    description: "Do a dry run"
     required: false
-    default: 'false'
+    default: "false"
   multi-stage:
-    description: 'Enable multi-stage deployment'
+    description: "Enable multi-stage deployment"
     required: false
-    default: 'false'
+    default: "false"
   commit-sha:
-    description: 'Store commit SHA in tag.yaml'
+    description: "Store commit SHA in tag.yaml"
     required: false
-    default: 'false'
+    default: "false"
   extra-tag1:
-    description: 'Extra tag 1 to update (format: path.in.yaml:value)'
+    description: "Extra tag 1 to update (format: path.in.yaml:value)"
     required: false
-    default: ''
+    default: ""
   extra-tag2:
-    description: 'Extra tag 2 to update (format: path.in.yaml:value)'
+    description: "Extra tag 2 to update (format: path.in.yaml:value)"
     required: false
-    default: ''
+    default: ""
   override-stack:
-    description: 'Stack ID to override normal selection logic'
+    description: "Stack ID to override normal selection logic"
     required: false
-    default: ''    
+    default: ""
   metadata:
-    description: 'Base64 encoded JSON with trigger metadata'
+    description: "Base64 encoded JSON with trigger metadata"
     required: false
-    default: ''
+    default: ""
   github-token:
-    description: 'GitHub token for authentication'
+    description: "GitHub token for authentication"
     required: true
 
 runs:
-  using: 'composite'
+  using: "composite"
   steps:
     - name: Save GitHub context
       shell: bash
@@ -54,7 +54,7 @@ runs:
 
     - uses: actions/setup-python@v5.2.0
       with:
-        python-version: '3.13'
+        python-version: "3.13"
 
     - uses: robinraju/release-downloader@v1.9
       with:
@@ -66,14 +66,14 @@ runs:
       run: |
         git config --global --add safe.directory "*"
         git fetch --all --prune
-        
+
         # Setup canary branches
         for branch in canary-orion canary-ursa; do
           if git ls-remote --heads origin $branch | grep -q "$branch"; then
             git checkout -B $branch origin/$branch
           fi
         done
-        
+
         # Return to original branch
         git checkout ${{ github.ref_name }}
 
@@ -87,10 +87,17 @@ runs:
         MULTI_STAGE: ${{ inputs.multi-stage }}
         EXTRA_TAG1: ${{ inputs.extra-tag1 }}
         EXTRA_TAG2: ${{ inputs.extra-tag2 }}
-        OVERRIDE_STACK: ${{ inputs.override-stack }}        
+        OVERRIDE_STACK: ${{ inputs.override-stack }}
         METADATA: ${{ inputs.metadata }}
         GH_TOKEN: ${{ inputs.github-token }}
         COMMIT_PIPELINE_SHA: ${{ inputs.commit-sha }}
       run: |
-        pip install helm_image_updater-*.tar.gz
-        helm-image-updater
+        pip install PyYAML GitPython PyGithub dpath
+
+        # Run the script directly from the source
+        python -c "
+        import sys
+        sys.path.append('${{ github.action_path }}')
+        from helm_image_updater.cli import main
+        main()
+        "
