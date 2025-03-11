@@ -92,12 +92,5 @@ runs:
         GH_TOKEN: ${{ inputs.github-token }}
         COMMIT_PIPELINE_SHA: ${{ inputs.commit-sha }}
       run: |
-        pip install PyYAML GitPython PyGithub dpath
-        
-        # Run the script directly from the source
-        python -c "
-        import sys
-        sys.path.append('${{ github.action_path }}')
-        from helm_image_updater.cli import main
-        main()
-        "
+        pip install helm_image_updater-*.tar.gz
+        helm-image-updater
