@@ -125,7 +125,7 @@ on:
         type: boolean
         default: false
       override-stack:
-        description: "Stack ID to override normal selection logic"
+        description: "Stack ID to explicitly target for the update, bypassing automatic stack selection."
         required: false
         type: string
         default: ''
