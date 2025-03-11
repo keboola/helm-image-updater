@@ -18,7 +18,7 @@ Environment Variables:
     AUTOMERGE: Whether to automatically merge created PRs (default: "true")
     DRY_RUN: Whether to perform a dry run without making actual changes (default: "false")
     TARGET_PATH: Path to the directory containing the stacks (default: ".")
-    OVERRIDE_STACK: Stack ID to override normal selection logic (default: None)
+    OVERRIDE_STACK: Stack ID to explicitly target for the update, bypassing automatic stack selection. (default: "")
 
 Usage:
     This script is intended to be run as part of a GitHub Actions workflow.
