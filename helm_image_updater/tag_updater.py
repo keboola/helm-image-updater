@@ -567,7 +567,7 @@ def update_stack_by_id(config: UpdateConfig, stack_id: str):
         stack_id (str): The ID of the stack to update.
         
     Returns:
-        dict or None: A dictionary with update information if successful, None otherwise.
+        tuple: A tuple containing a list of changes and a list of missing tag.yaml files.
     """
     # Check if the stack exists and is not in ignored folders
     if not os.path.isdir(stack_id) or stack_id in IGNORED_FOLDERS:
