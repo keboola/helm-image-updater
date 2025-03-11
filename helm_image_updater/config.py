@@ -24,6 +24,7 @@ from github.Repository import Repository
 
 # Constants
 DEV_STACKS = ["dev-keboola-gcp-us-central1"]
+EXCLUDED_STACKS = ["dev-keboola-gcp-us-east1-e2e"]
 CANARY_STACKS = {
     "canary-orion": {
         "stack": "dev-keboola-canary-orion",
