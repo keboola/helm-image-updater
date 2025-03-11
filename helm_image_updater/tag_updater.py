@@ -29,6 +29,7 @@ from .config import (
     CANARY_STACKS,
     GITHUB_BRANCH,
     IGNORED_FOLDERS,
+    EXCLUDED_STACKS,
 )
 from .pr_manager import create_pr
 from .utils import get_trigger_metadata, random_suffix
@@ -119,6 +120,7 @@ def is_production_stack(stack: str) -> bool:
     return (
         os.path.isdir(stack)
         and stack not in IGNORED_FOLDERS
+        and stack not in EXCLUDED_STACKS
         and stack not in DEV_STACKS
         and stack not in canary_stacks
     )
@@ -131,6 +133,7 @@ def is_dev_stack(stack: str) -> bool:
     return (
         os.path.isdir(stack)
         and stack not in IGNORED_FOLDERS
+        and stack not in EXCLUDED_STACKS
         and stack in DEV_STACKS
         and stack not in canary_stacks
     )
