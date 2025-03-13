@@ -54,7 +54,7 @@ Optional:
 - `DRY_RUN`: Whether to perform a dry run (default: "false")
 - `MULTI_STAGE`: Enable multi-stage deployment (default: "false")
 - `TARGET_PATH`: Path to the directory containing the stacks (default: ".")
-- `OVERRIDE_STACK`: Stack ID to override normal selection logic (default: None)
+- `OVERRIDE_STACK`: Stack ID to explicitly target for the update, bypassing automatic stack selection (default: None)
 - `EXTRA_TAG1`, `EXTRA_TAG2`: Additional tags to update (format: "path:value")
 
 ### Command Line Examples
