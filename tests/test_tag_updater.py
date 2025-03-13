@@ -52,6 +52,11 @@ def test_stacks(tmp_path):
     (dev_stack / "test-chart").mkdir()
     create_tag_yaml(dev_stack / "test-chart" / "tag.yaml", "old-tag")
 
+    e2e_stack = tmp_path / "dev-keboola-gcp-us-east1-e2e"
+    e2e_stack.mkdir()
+    (e2e_stack / "test-chart").mkdir()
+    create_tag_yaml(e2e_stack / "test-chart" / "tag.yaml", "old-tag")
+
     # Create production stacks
     com_stack = tmp_path / "com-keboola-prod"
     com_stack.mkdir()
