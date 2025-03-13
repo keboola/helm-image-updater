@@ -562,8 +562,8 @@ def update_stack_by_id(config: UpdateConfig, stack_id: str):
     """Update a single selected stack with the new image tag.
     
     This function respects the tag conventions:
-    - dev- tags can only go to dev stacks
-    - production- tags can go to any stack
+    - Any tag can go to dev stacks
+    - Only production- tags can go to production stacks
     
     Args:
         config (UpdateConfig): The configuration object.
@@ -577,25 +577,15 @@ def update_stack_by_id(config: UpdateConfig, stack_id: str):
         print(f"Stack {stack_id} does not exist or is in ignored folders")
         return [], []
     
-
-    # allow only production- tags or dev- tags
     extra_tags = config.extra_tags or []
     all_tags = [tag["value"] for tag in extra_tags]
     all_tags.append(config.image_tag)
 
-    if not all(tag.startswith("dev-") or tag.startswith("production-") for tag in all_tags):
-        print("Invalid tag format. Must start with 'dev-' or 'production-'.")
-        return [], []   
-
-    extra_tags_contains_dev = config.extra_tags and any(
-        tag["value"].startswith("dev-") for tag in config.extra_tags
-    )    
-    
-    # Validate tag and stack compatibility
-    # dev- tags can only go to dev stacks
-    if (config.image_tag.startswith("dev-") or extra_tags_contains_dev) and is_production_stack(stack_id):
-        print(f"Cannot apply dev tag to non-dev stack {stack_id}")
-        return [], []
+    # For production stacks, ensure all tags start with "production-"
+    if is_production_stack(stack_id):
+        if not all(tag.startswith("production-") for tag in all_tags):
+            print(f"Cannot apply non-production tag to production stack {stack_id}")
+            return [], []
     
     # Update the tag.yaml file
     tag_file_path = f"{stack_id}/{config.helm_chart}/tag.yaml"

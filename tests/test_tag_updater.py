@@ -558,6 +558,16 @@ def test_update_stack_by_id(test_stacks, mock_repo, mock_github_repo, monkeypatc
     assert updated_stacks[0]["stack"] == "dev-keboola-gcp-us-central1"
     assert len(pr_created) == 1, "Should create a PR"
     
+    # Test updating a dev stack with a custom tag (not starting with dev- or production-)
+    print("\nUpdating dev stack with custom tag:")
+    config.image_tag = "custom-1.2.3"
+    pr_created.clear()
+    updated_stacks, failed_stacks = update_stack_by_id(config, "dev-keboola-gcp-us-central1")
+    assert len(updated_stacks) == 1, "Should return one updated stack"
+    assert len(failed_stacks) == 0, "Should not have any failed stacks"
+    assert updated_stacks[0]["stack"] == "dev-keboola-gcp-us-central1"
+    assert len(pr_created) == 1, "Should create a PR"
+    
     # Test updating a production stack with a production tag
     print("\nUpdating production stack with production tag:")
     config.image_tag = "production-1.2.3"
@@ -568,14 +578,21 @@ def test_update_stack_by_id(test_stacks, mock_repo, mock_github_repo, monkeypatc
     assert updated_stacks[0]["stack"] == "com-keboola-prod"
     assert len(pr_created) == 1, "Should create a PR"
     
-    # Test incompatible tag and stack
+    # Test incompatible tag and stack (non-production tag with production stack)
     print("\nTesting incompatible tag and stack:")
-    config.image_tag = "dev-1.2.3"
+    config.image_tag = "custom-1.2.3"
     pr_created.clear()
     updated_stacks, failed_stacks = update_stack_by_id(config, "com-keboola-prod")
     assert len(updated_stacks) == 0, "Should not have any updated stacks for incompatible tag and stack"
     assert len(failed_stacks) == 0, "Should not have any failed stacks for incompatible tag and stack"
     assert len(pr_created) == 0, "Should not create a PR"
     
-
-
+    # Test updating a E2E stack with a build tag
+    print("\nUpdating E2E stack with build tag:")
+    config.image_tag = "martin-dev-1.2.3"
+    pr_created.clear()
+    updated_stacks, failed_stacks = update_stack_by_id(config, "dev-keboola-gcp-us-east1-e2e")
+    assert len(updated_stacks) == 1, "Should return one updated stack"
+    assert len(failed_stacks) == 0, "Should not have any failed stacks"
+    assert updated_stacks[0]["stack"] == "dev-keboola-gcp-us-east1-e2e"
+    assert len(pr_created) == 1, "Should create a PR"
