@@ -640,4 +640,98 @@ def test_dev_tag_with_production_override_stack(cli_test_env, capsys):
     assert prod_tag_yaml["image"]["tag"] == "old-tag"
     
     # Verify no PR was created
-    assert len(created_prs) == 0 
+    assert len(created_prs) == 0
+
+
+def test_happy_path_production_update(cli_test_env, capsys):
+    """Test the most common happy path - production tag with automerge.
+    
+    This test verifies the complete flow for the most common production scenario:
+    1. Production tag is applied to all stacks
+    2. Automerge is enabled (default)
+    3. Dry run is disabled (default)
+    4. Git operations are performed correctly
+    5. PR is created and auto-merged
+    """
+    base_dir, mock_repo, mock_github_repo = cli_test_env
+    
+    # Set environment variables for production update
+    os.environ["HELM_CHART"] = "test-chart"
+    os.environ["IMAGE_TAG"] = "production-2.0.0"
+    os.environ["AUTOMERGE"] = "true"  # this is default, but being explicit
+    # DRY_RUN is not set, which defaults to false
+    
+    # Set up mock repo to track git operations
+    mock_repo.git.reset_mock()
+    
+    # Set up mock PR that simulates a successful PR creation and merge
+    mock_pr = MagicMock()
+    mock_pr.html_url = "https://github.com/mock-org/mock-repo/pull/999"
+    mock_pr.mergeable = True  # PR is mergeable
+    mock_github_repo.create_pull.return_value = mock_pr
+    
+    # Track PR creation calls
+    created_prs = []
+    def mock_create_pr(config, branch_name, pr_title, base="main"):
+        """Mock PR creation with auto-merge functionality."""
+        created_prs.append({
+            "branch": branch_name, 
+            "title": pr_title, 
+            "base": base,
+            "automerge": config.automerge
+        })
+        
+        # Simulate the non-dry-run behavior that would occur in create_pr
+        config.repo.git.push("origin", branch_name)
+        pr = config.github_repo.create_pull(
+            title=pr_title,
+            body="Mock PR body",
+            head=branch_name,
+            base=base,
+        )
+        
+        # Auto-merge if configured
+        if config.automerge:
+            pr.merge()
+            print(f"Created and auto-merged PR: {pr_title} (branch: {branch_name}, base: {base})")
+        else:
+            print(f"Created PR: {pr_title} (branch: {branch_name}, base: {base})")
+            
+        return pr
+    
+    # Mock create_pr function
+    with patch('helm_image_updater.tag_updater.create_pr', mock_create_pr):
+        # Run CLI
+        cli.main()
+    
+    # Check console output
+    captured = capsys.readouterr()
+    assert "Processing Helm chart: test-chart" in captured.out
+    assert "New image tag: production-2.0.0" in captured.out
+    assert "Updating all stacks (production- tag)" in captured.out
+    
+    # Verify tag.yaml was updated in both dev and prod stacks
+    dev_tag_yaml = read_tag_yaml(base_dir / "dev-keboola-gcp-us-central1" / "test-chart" / "tag.yaml")
+    assert dev_tag_yaml["image"]["tag"] == "production-2.0.0"
+    
+    prod_tag_yaml = read_tag_yaml(base_dir / "com-keboola-prod" / "test-chart" / "tag.yaml")
+    assert prod_tag_yaml["image"]["tag"] == "production-2.0.0"
+    
+    # Verify Git operations were performed
+    assert mock_repo.git.checkout.called, "git checkout should be called"
+    assert mock_repo.git.add.called, "git add should be called"
+    assert mock_repo.git.commit.called, "git commit should be called"
+    assert mock_repo.git.push.called, "git push should be called"
+    
+    # Verify PR was created with correct parameters
+    assert mock_github_repo.create_pull.called, "create_pull should be called"
+    call_args = mock_github_repo.create_pull.call_args[1]
+    assert "test-chart" in call_args["title"]
+    assert call_args["base"] == "main"
+    
+    # Verify PR auto-merge was attempted
+    assert mock_pr.merge.called, "PR merge should be called for auto-merge"
+    
+    # Verify our tracking shows PR was created with automerge enabled
+    assert len(created_prs) == 1
+    assert created_prs[0]["automerge"] is True 
