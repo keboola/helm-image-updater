@@ -553,4 +553,91 @@ def test_dry_run(cli_test_env, capsys):
     
     # Verify git commands were not called (which would happen if PR was actually created)
     assert not mock_repo.git.push.called, "Git push should not be called in dry run"
-    assert not mock_github_repo.create_pull.called, "GitHub create_pull should not be called in dry run" 
+    assert not mock_github_repo.create_pull.called, "GitHub create_pull should not be called in dry run"
+
+
+def test_custom_tag_with_override_stack(cli_test_env, capsys):
+    """Test that custom tag formats can be used with override stack.
+    
+    This test verifies that:
+    1. Non-standard tag formats (like connection-dev-tag-1) can be used when OVERRIDE_STACK is defined
+    2. Only the specified stack is updated
+    3. PR is created with the correct information
+    """
+    base_dir, mock_repo, mock_github_repo = cli_test_env
+    
+    # Set environment variables with custom tag and override stack
+    os.environ["HELM_CHART"] = "test-chart"
+    os.environ["IMAGE_TAG"] = "connection-dev-tag-1"  # Non-standard tag format
+    os.environ["OVERRIDE_STACK"] = "dev-keboola-gcp-us-central1"  # Explicitly target a dev stack
+    
+    # Track PRs
+    created_prs = []
+    def mock_create_pr(config, branch_name, pr_title, base="main"):
+        """Mock PR creation to track PR details."""
+        created_prs.append({"branch": branch_name, "title": pr_title, "base": base})
+        print(f"Created PR: {pr_title} (branch: {branch_name}, base: {base})")
+    
+    # Mock create_pr but use real config
+    with patch('helm_image_updater.tag_updater.create_pr', mock_create_pr):
+        # Run CLI
+        cli.main()
+    
+    # Check console output
+    captured = capsys.readouterr()
+    assert "Processing Helm chart: test-chart" in captured.out
+    assert "Override stack: dev-keboola-gcp-us-central1" in captured.out
+    
+    # Verify tag.yaml was updated in the specified stack
+    dev_tag_yaml = read_tag_yaml(base_dir / "dev-keboola-gcp-us-central1" / "test-chart" / "tag.yaml")
+    assert dev_tag_yaml["image"]["tag"] == "connection-dev-tag-1"
+    
+    # Verify other stacks were NOT updated
+    prod_tag_yaml = read_tag_yaml(base_dir / "com-keboola-prod" / "test-chart" / "tag.yaml")
+    assert prod_tag_yaml["image"]["tag"] == "old-tag"
+    
+    # Verify PR was created
+    assert len(created_prs) == 1
+    assert "test-chart" in created_prs[0]["title"]
+    assert "dev-keboola-gcp-us-central1" in created_prs[0]["title"]
+
+
+def test_dev_tag_with_production_override_stack(cli_test_env, capsys):
+    """Test that dev tags cannot be used with production stack override.
+    
+    This test verifies that:
+    1. When targeting a production stack with OVERRIDE_STACK
+    2. Using a dev tag is rejected
+    3. No files are changed
+    4. No PRs are created
+    """
+    base_dir, mock_repo, mock_github_repo = cli_test_env
+    
+    # Set environment variables with dev tag and production stack override
+    os.environ["HELM_CHART"] = "test-chart"
+    os.environ["IMAGE_TAG"] = "dev-123-tag"  # Dev tag
+    os.environ["OVERRIDE_STACK"] = "com-keboola-prod"  # Production stack
+    
+    # Track PRs
+    created_prs = []
+    def mock_create_pr(config, branch_name, pr_title, base="main"):
+        """Mock PR creation to track PR details."""
+        created_prs.append({"branch": branch_name, "title": pr_title, "base": base})
+        print(f"Created PR: {pr_title} (branch: {branch_name}, base: {base})")
+    
+    # Mock create_pr but use real config
+    with patch('helm_image_updater.tag_updater.create_pr', mock_create_pr):
+        # Run CLI
+        cli.main()
+    
+    # Check console output
+    captured = capsys.readouterr()
+    assert "Processing Helm chart: test-chart" in captured.out
+    assert "Cannot apply non-production tag to production stack" in captured.out
+    
+    # Verify tag.yaml was NOT updated in the production stack
+    prod_tag_yaml = read_tag_yaml(base_dir / "com-keboola-prod" / "test-chart" / "tag.yaml")
+    assert prod_tag_yaml["image"]["tag"] == "old-tag"
+    
+    # Verify no PR was created
+    assert len(created_prs) == 0 
