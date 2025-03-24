@@ -89,8 +89,8 @@ def main():
             print("Error: Either IMAGE_TAG or at least one EXTRA_TAG must be set")
             sys.exit(1)
 
-        # Validate image_tag format if it's set
-        if image_tag.strip():
+        # Validate image_tag format if it's set, unless override_stack is set
+        if image_tag.strip() and not override_stack:
             valid_prefixes = ["dev-", "production-"] + list(CANARY_STACKS.keys())
             if not any(image_tag.startswith(prefix) for prefix in valid_prefixes):
                 print(
@@ -99,7 +99,7 @@ def main():
                 )
                 sys.exit(1)
 
-        if extra_tags:
+        if extra_tags and not override_stack:
             for tag in extra_tags:
                 if not (
                     tag["value"].startswith("dev-")
