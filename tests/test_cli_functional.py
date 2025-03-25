@@ -120,6 +120,12 @@ def setup_test_stacks(base_path):
     (canary_stack / "test-chart").mkdir()
     create_tag_yaml(canary_stack / "test-chart" / "tag.yaml", "old-tag")
 
+    # Create e2e dev stack
+    e2e_dev_stack = base_path / "dev-keboola-gcp-us-east1-e2e"
+    e2e_dev_stack.mkdir()
+    (e2e_dev_stack / "test-chart").mkdir()
+    create_tag_yaml(e2e_dev_stack / "test-chart" / "tag.yaml", "old-tag")
+
 
 def create_tag_yaml(path, tag):
     """Helper to create tag.yaml files."""
@@ -569,7 +575,7 @@ def test_custom_tag_with_override_stack(cli_test_env, capsys):
     # Set environment variables with custom tag and override stack
     os.environ["HELM_CHART"] = "test-chart"
     os.environ["IMAGE_TAG"] = "dev-tag-1"  # Non-standard tag format
-    os.environ["OVERRIDE_STACK"] = "dev-keboola-gcp-us-central1"  # Explicitly target a dev stack
+    os.environ["OVERRIDE_STACK"] = "dev-keboola-gcp-us-east1-e2e"  # Explicitly target a dev stack
     
     # Track PRs
     created_prs = []
@@ -586,10 +592,10 @@ def test_custom_tag_with_override_stack(cli_test_env, capsys):
     # Check console output
     captured = capsys.readouterr()
     assert "Processing Helm chart: test-chart" in captured.out
-    assert "Override stack: dev-keboola-gcp-us-central1" in captured.out
+    assert "Override stack: dev-keboola-gcp-us-east1-e2e" in captured.out
     
     # Verify tag.yaml was updated in the specified stack
-    dev_tag_yaml = read_tag_yaml(base_dir / "dev-keboola-gcp-us-central1" / "test-chart" / "tag.yaml")
+    dev_tag_yaml = read_tag_yaml(base_dir / "dev-keboola-gcp-us-east1-e2e" / "test-chart" / "tag.yaml")
     assert dev_tag_yaml["image"]["tag"] == "dev-tag-1"
     
     # Verify other stacks were NOT updated
@@ -599,7 +605,7 @@ def test_custom_tag_with_override_stack(cli_test_env, capsys):
     # Verify PR was created
     assert len(created_prs) == 1
     assert "test-chart" in created_prs[0]["title"]
-    assert "dev-keboola-gcp-us-central1" in created_prs[0]["title"]
+    assert "dev-keboola-gcp-us-east1-e2e" in created_prs[0]["title"]
 
 
 def test_dev_tag_with_production_override_stack(cli_test_env, capsys):
