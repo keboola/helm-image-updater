@@ -568,7 +568,7 @@ def test_custom_tag_with_override_stack(cli_test_env, capsys):
     
     # Set environment variables with custom tag and override stack
     os.environ["HELM_CHART"] = "test-chart"
-    os.environ["IMAGE_TAG"] = "connection-dev-tag-1"  # Non-standard tag format
+    os.environ["IMAGE_TAG"] = "dev-tag-1"  # Non-standard tag format
     os.environ["OVERRIDE_STACK"] = "dev-keboola-gcp-us-central1"  # Explicitly target a dev stack
     
     # Track PRs
@@ -590,7 +590,7 @@ def test_custom_tag_with_override_stack(cli_test_env, capsys):
     
     # Verify tag.yaml was updated in the specified stack
     dev_tag_yaml = read_tag_yaml(base_dir / "dev-keboola-gcp-us-central1" / "test-chart" / "tag.yaml")
-    assert dev_tag_yaml["image"]["tag"] == "connection-dev-tag-1"
+    assert dev_tag_yaml["image"]["tag"] == "dev-tag-1"
     
     # Verify other stacks were NOT updated
     prod_tag_yaml = read_tag_yaml(base_dir / "com-keboola-prod" / "test-chart" / "tag.yaml")
