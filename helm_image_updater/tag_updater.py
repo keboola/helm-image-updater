@@ -265,9 +265,16 @@ def update_production_stacks(config: UpdateConfig):
                 "-m",
                 f"Update {config.helm_chart} to {image_tag_str} in all stacks",
             )
-        pr_title_prefix = (
-            "[multi-stage] [prod sync]" if config.multi_stage else "[prod sync]"
-        )
+        
+        # Use a different PR title prefix when automerge is false in multi-stage mode
+        if config.multi_stage:
+            if config.automerge:
+                pr_title_prefix = "[multi-stage] [prod sync]"
+            else:
+                pr_title_prefix = "[multi-stage] [prod sync manual]"  # Different format that won't match the workflow search
+        else:
+            pr_title_prefix = "[prod sync]"
+            
         create_pr(
             config,
             branch_name,
@@ -519,13 +526,13 @@ def handle_production_tag(config: UpdateConfig):
     if not config.multi_stage:
         return update_production_stacks(config)
 
-    # First update dev stacks with auto-merge (always auto-merge in multi-stage)
+    # First update dev stacks with user's automerge setting
     dev_config = UpdateConfig(
         repo=config.repo,
         github_repo=config.github_repo,
         helm_chart=config.helm_chart,
         image_tag=config.image_tag,
-        automerge=True,  # Always auto-merge dev in multi-stage
+        automerge=config.automerge,  # Use user's automerge setting instead of forcing True
         dry_run=config.dry_run,
         multi_stage=config.multi_stage,
         extra_tags=config.extra_tags,
