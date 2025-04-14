@@ -50,3 +50,4 @@ class UpdateConfig:
     multi_stage: bool = False
     extra_tags: Optional[List[dict]] = None
     commit_sha: bool = False
+    user_requested_automerge: Optional[bool] = None
