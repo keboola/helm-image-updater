@@ -532,11 +532,11 @@ def test_multi_stage_with_automerge_false(cli_test_env, capsys):
     This test verifies that:
     1. With multi-stage=true and automerge=false
     2. For production tags, it creates:
-       - Dev PR with [multi-stage] [test sync] that respects the automerge=false setting
+       - Dev PR with [multi-stage] [test sync manual] that respects the automerge=false setting
        - Prod PR with [multi-stage] [prod sync manual] that is NOT auto-merged
     3. The automerge setting for dev stacks respects user's setting
     4. The automerge setting for prod stacks is always forced to false
-    5. The prod PR uses a different title format that won't match automated workflows
+    5. The PR titles use different formats that won't match automated workflows
     """
     base_dir, mock_repo, mock_github_repo = cli_test_env
     
@@ -570,12 +570,16 @@ def test_multi_stage_with_automerge_false(cli_test_env, capsys):
     # Verify 2 PRs were created
     assert len(created_prs) == 2, "Should create exactly 2 PRs"
     
+    # Debug: Print all PR titles
+    for pr in created_prs:
+        print(f"DEBUG - Created PR title: '{pr['title']}', automerge: {pr['automerge']}")
+    
     # Find dev and prod PRs
-    dev_pr = next((pr for pr in created_prs if "[test sync]" in pr["title"]), None)
+    dev_pr = next((pr for pr in created_prs if "[test sync manual]" in pr["title"]), None)
     prod_pr = next((pr for pr in created_prs if "[prod sync manual]" in pr["title"]), None)
     
     # Verify PRs exist with correct settings
-    assert dev_pr is not None, "Should create a dev PR with [test sync]"
+    assert dev_pr is not None, "Should create a dev PR with [test sync manual]"
     assert prod_pr is not None, "Should create a prod PR with [prod sync manual]"
     
     # Verify automerge settings
@@ -586,7 +590,9 @@ def test_multi_stage_with_automerge_false(cli_test_env, capsys):
     assert "[multi-stage]" in dev_pr["title"], "Dev PR should have [multi-stage] prefix"
     assert "[multi-stage]" in prod_pr["title"], "Prod PR should have [multi-stage] prefix"
     
-    # Verify prod PR has the manual format that won't match workflow searches
+    # Verify PR titles have the manual format that won't match workflow searches
+    assert "[test sync]" not in dev_pr["title"], "Dev PR should NOT have [test sync] in title"
+    assert "[test sync manual]" in dev_pr["title"], "Dev PR should have [test sync manual] in title"
     assert "[prod sync]" not in prod_pr["title"], "Prod PR should NOT have [prod sync] in title"
     assert "[prod sync manual]" in prod_pr["title"], "Prod PR should have [prod sync manual] in title"
 

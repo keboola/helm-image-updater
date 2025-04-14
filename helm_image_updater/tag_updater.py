@@ -197,9 +197,15 @@ def update_dev_stack(config: UpdateConfig):
                     "-m",
                     f"Update {config.helm_chart} to {image_tag_str} in dev stacks",
                 )
-            pr_title_prefix = (
-                "[multi-stage] [test sync]" if config.multi_stage else "[test sync]"
-            )
+            # Set PR title prefix based on automerge setting
+            if config.multi_stage:
+                if config.automerge:
+                    pr_title_prefix = "[multi-stage] [test sync]"
+                else:
+                    pr_title_prefix = "[multi-stage] [test sync manual]"
+            else:
+                pr_title_prefix = "[test sync]"
+                
             create_pr(
                 config,
                 branch_name,
@@ -316,13 +322,21 @@ def update_stack(config: UpdateConfig, stack_folder: str):
 
             # Determine PR title prefix based on stack type
             if is_dev_stack(stack_folder):
-                pr_title_prefix = (
-                    "[multi-stage] [test sync]" if config.multi_stage else "[test sync]"
-                )
+                if config.multi_stage:
+                    if config.automerge:
+                        pr_title_prefix = "[multi-stage] [test sync]"
+                    else:
+                        pr_title_prefix = "[multi-stage] [test sync manual]"
+                else:
+                    pr_title_prefix = "[test sync]"
             else:
-                pr_title_prefix = (
-                    "[multi-stage] [prod sync]" if config.multi_stage else "[prod sync]"
-                )
+                if config.multi_stage:
+                    if config.automerge:
+                        pr_title_prefix = "[multi-stage] [prod sync]"
+                    else:
+                        pr_title_prefix = "[multi-stage] [prod sync manual]"
+                else:
+                    pr_title_prefix = "[prod sync]"
 
             create_pr(
                 config,
