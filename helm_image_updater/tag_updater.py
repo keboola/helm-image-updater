@@ -199,7 +199,7 @@ def update_dev_stack(config: UpdateConfig):
                 )
             # Set PR title prefix based on automerge setting
             if config.multi_stage:
-                if config.automerge:
+                if config.user_requested_automerge:
                     pr_title_prefix = "[multi-stage] [test sync]"
                 else:
                     pr_title_prefix = "[multi-stage] [test sync manual]"
@@ -274,9 +274,8 @@ def update_production_stacks(config: UpdateConfig):
         
         # Use a different PR title prefix when automerge is false in multi-stage mode
         if config.multi_stage:
-            # In multi-stage, check if the user requested automerge (user intent)
-            user_requested_automerge = os.environ.get("AUTOMERGE", "true").lower() == "true"
-            if user_requested_automerge:
+            # In multi-stage, check the original user automerge intent
+            if config.user_requested_automerge:
                 # If user wanted automerge, use regular prod sync format (workflow will find it)
                 pr_title_prefix = "[multi-stage] [prod sync]"
             else:
@@ -327,7 +326,7 @@ def update_stack(config: UpdateConfig, stack_folder: str):
             # Determine PR title prefix based on stack type
             if is_dev_stack(stack_folder):
                 if config.multi_stage:
-                    if config.automerge:
+                    if config.user_requested_automerge:
                         pr_title_prefix = "[multi-stage] [test sync]"
                     else:
                         pr_title_prefix = "[multi-stage] [test sync manual]"
@@ -335,7 +334,7 @@ def update_stack(config: UpdateConfig, stack_folder: str):
                     pr_title_prefix = "[test sync]"
             else:
                 if config.multi_stage:
-                    if config.automerge:
+                    if config.user_requested_automerge:
                         pr_title_prefix = "[multi-stage] [prod sync]"
                     else:
                         pr_title_prefix = "[multi-stage] [prod sync manual]"
@@ -550,11 +549,12 @@ def handle_production_tag(config: UpdateConfig):
         github_repo=config.github_repo,
         helm_chart=config.helm_chart,
         image_tag=config.image_tag,
-        automerge=config.automerge,  # Use user's automerge setting instead of forcing True
+        automerge=config.automerge,  # Use user's automerge setting
         dry_run=config.dry_run,
         multi_stage=config.multi_stage,
         extra_tags=config.extra_tags,
         commit_sha=config.commit_sha,
+        user_requested_automerge=config.user_requested_automerge,  # Pass through original setting
     )
     dev_changes, dev_missing = update_dev_stack(dev_config)
 
@@ -569,6 +569,7 @@ def handle_production_tag(config: UpdateConfig):
         multi_stage=config.multi_stage,
         extra_tags=config.extra_tags,
         commit_sha=config.commit_sha,
+        user_requested_automerge=config.user_requested_automerge,  # Pass through original setting
     )
     prod_changes, prod_missing = update_production_stacks(prod_config)
 

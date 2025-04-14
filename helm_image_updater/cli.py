@@ -167,6 +167,7 @@ def main():
             multi_stage=multi_stage,
             extra_tags=extra_tags if extra_tags else None,
             commit_sha=commit_sha,
+            user_requested_automerge=automerge,
         )
 
         # Group extra tags by value and join paths with the same value
