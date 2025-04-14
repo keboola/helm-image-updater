@@ -55,11 +55,16 @@ def create_pr_body(config: UpdateConfig) -> str:
         repo_url = source.get("repository_url", "")
         workflow_url = source.get("workflow_url", "")
         sha = source.get("sha", "Unknown")
+        pr_url = source.get("pr_url", "")
+        
+        # Build PR line for insertion only if it exists
+        pr_line = f"- **Pull Request:** [{pr_url}]({pr_url})\n" if pr_url else ""
 
         trigger_info = (
             "### 🔄 Pipeline Trigger\n"
             "#### Source Details\n"
             f"- **Repository:** [{repo}]({repo_url})\n"
+            f"{pr_line}"
             f"- **Commit:** [`{sha[:7]}`]({repo_url}/commit/{sha})\n"
             f"- **Actor:** {source.get('actor', 'Unknown')}\n\n"
             "#### Workflow Information\n"
