@@ -489,13 +489,18 @@ def test_nonexistent_stack_override(cli_test_env, capsys):
     assert len(created_prs) == 0
 
 
-def test_multi_stage(cli_test_env, capsys):
-    """Test multi-stage deployment.
+def test_multi_stage_automerge_true(cli_test_env, capsys):
+    """Test multi-stage deployment with automerge=true.
     
     This test verifies that:
-    1. Multi-stage flag is respected
-    2. PR title is correctly prefixed
-    3. The right stacks are updated
+    1. With multi-stage=true and automerge=true
+    2. For production tags, it creates:
+       - Dev PR with [multi-stage] [test sync] that has automerge=true
+       - Prod PR with [multi-stage] [prod sync] that has automerge=false
+    3. The automerge setting for dev stacks is true (as requested)
+    4. The automerge setting for prod stacks is forced to false (regardless of input)
+    5. The prod PR title uses regular [prod sync] format when automerge=true is requested
+       (This allows workflow to find it even though the PR itself won't auto-merge)
     """
     base_dir, mock_repo, mock_github_repo = cli_test_env
     
@@ -505,13 +510,18 @@ def test_multi_stage(cli_test_env, capsys):
     os.environ["MULTI_STAGE"] = "true"
     os.environ["AUTOMERGE"] = "true"
     
-    # Track PRs
+    # Track PRs with their automerge setting
     created_prs = []
     def mock_create_pr(config, branch_name, pr_title, base="main"):
-        created_prs.append({"branch": branch_name, "title": pr_title, "base": base})
-        print(f"Created PR: {pr_title} (branch: {branch_name}, base: {base})")
+        created_prs.append({
+            "branch": branch_name, 
+            "title": pr_title, 
+            "base": base,
+            "automerge": config.automerge
+        })
+        print(f"Created PR: {pr_title} (branch: {branch_name}, base: {base}, automerge: {config.automerge})")
     
-    # Only mock create_pr, use real config
+    # Mock create_pr but use real config to capture automerge setting
     with patch('helm_image_updater.tag_updater.create_pr', mock_create_pr):
         # Run CLI
         cli.main()
@@ -519,11 +529,31 @@ def test_multi_stage(cli_test_env, capsys):
     # Check console output
     captured = capsys.readouterr()
     assert "Multi-stage deployment: True" in captured.out
+    assert "Automerge: True" in captured.out
     
-    # Verify PRs were created (2 PRs: one for dev, one for prod)
-    assert len(created_prs) > 0
-    # Verify multi-stage prefix in PR title
-    assert any("[multi-stage]" in pr["title"] for pr in created_prs)
+    # Verify 2 PRs were created
+    assert len(created_prs) == 2, "Should create exactly 2 PRs"
+    
+    # Debug: Print all PR titles for inspection
+    print("DEBUG: All PR titles:")
+    for pr in created_prs:
+        print(f"  - '{pr['title']}' (automerge: {pr['automerge']})")
+    
+    # Find dev and prod PRs
+    dev_pr = next((pr for pr in created_prs if "[multi-stage] [test sync]" in pr["title"]), None)
+    prod_pr = next((pr for pr in created_prs if "[multi-stage] [prod sync]" in pr["title"]), None)
+    
+    # Verify PRs exist with correct settings
+    assert dev_pr is not None, "Should create a dev PR with [multi-stage] [test sync]"
+    assert prod_pr is not None, "Should create a prod PR with [multi-stage] [prod sync]"
+    
+    # Verify automerge settings
+    assert dev_pr["automerge"] is True, "Dev PR should have automerge=True"
+    assert prod_pr["automerge"] is False, "Prod PR should have automerge=False (forced by multi-stage)"
+    
+    # Verify complete PR title prefixes
+    assert dev_pr["title"].startswith("[multi-stage] [test sync]"), "Dev PR should start with [multi-stage] [test sync]"
+    assert prod_pr["title"].startswith("[multi-stage] [prod sync]"), "Prod PR should start with [multi-stage] [prod sync]"
 
 
 def test_multi_stage_with_automerge_false(cli_test_env, capsys):
@@ -537,6 +567,7 @@ def test_multi_stage_with_automerge_false(cli_test_env, capsys):
     3. The automerge setting for dev stacks respects user's setting
     4. The automerge setting for prod stacks is always forced to false
     5. The PR titles use different formats that won't match automated workflows
+       (This prevents automated workflows from finding these PRs)
     """
     base_dir, mock_repo, mock_github_repo = cli_test_env
     
@@ -570,31 +601,26 @@ def test_multi_stage_with_automerge_false(cli_test_env, capsys):
     # Verify 2 PRs were created
     assert len(created_prs) == 2, "Should create exactly 2 PRs"
     
-    # Debug: Print all PR titles
+    # Debug: Print all PR titles for inspection
+    print("DEBUG: All PR titles:")
     for pr in created_prs:
-        print(f"DEBUG - Created PR title: '{pr['title']}', automerge: {pr['automerge']}")
+        print(f"  - '{pr['title']}' (automerge: {pr['automerge']})")
     
     # Find dev and prod PRs
-    dev_pr = next((pr for pr in created_prs if "[test sync manual]" in pr["title"]), None)
-    prod_pr = next((pr for pr in created_prs if "[prod sync manual]" in pr["title"]), None)
+    dev_pr = next((pr for pr in created_prs if "[multi-stage] [test sync manual]" in pr["title"]), None)
+    prod_pr = next((pr for pr in created_prs if "[multi-stage] [prod sync manual]" in pr["title"]), None)
     
     # Verify PRs exist with correct settings
-    assert dev_pr is not None, "Should create a dev PR with [test sync manual]"
-    assert prod_pr is not None, "Should create a prod PR with [prod sync manual]"
+    assert dev_pr is not None, "Should create a dev PR with [multi-stage] [test sync manual]"
+    assert prod_pr is not None, "Should create a prod PR with [multi-stage] [prod sync manual]"
     
     # Verify automerge settings
     assert dev_pr["automerge"] is False, "Dev PR should have automerge=False"
     assert prod_pr["automerge"] is False, "Prod PR should have automerge=False"
     
-    # Verify multi-stage prefix in PR titles
-    assert "[multi-stage]" in dev_pr["title"], "Dev PR should have [multi-stage] prefix"
-    assert "[multi-stage]" in prod_pr["title"], "Prod PR should have [multi-stage] prefix"
-    
-    # Verify PR titles have the manual format that won't match workflow searches
-    assert "[test sync]" not in dev_pr["title"], "Dev PR should NOT have [test sync] in title"
-    assert "[test sync manual]" in dev_pr["title"], "Dev PR should have [test sync manual] in title"
-    assert "[prod sync]" not in prod_pr["title"], "Prod PR should NOT have [prod sync] in title"
-    assert "[prod sync manual]" in prod_pr["title"], "Prod PR should have [prod sync manual] in title"
+    # Verify complete PR title prefixes
+    assert dev_pr["title"].startswith("[multi-stage] [test sync manual]"), "Dev PR should start with [multi-stage] [test sync manual]"
+    assert prod_pr["title"].startswith("[multi-stage] [prod sync manual]"), "Prod PR should start with [multi-stage] [prod sync manual]"
 
 
 def test_dry_run(cli_test_env, capsys):
