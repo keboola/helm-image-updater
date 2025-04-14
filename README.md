@@ -220,7 +220,7 @@ Image tags must follow these formats:
 
 When `MULTI_STAGE=true`:
 
-1. Creates and auto-merges PR for dev stacks (if automerge is also true, otherwise won't merges the dev PR)
+1. Creates and auto-merges PR for dev stacks (if automerge is also true, otherwise won't merge the dev PR)
 2. Creates a separate PR (without auto-merge) for production stacks
 
 ## Development
