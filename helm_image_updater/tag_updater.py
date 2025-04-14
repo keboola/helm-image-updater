@@ -274,10 +274,14 @@ def update_production_stacks(config: UpdateConfig):
         
         # Use a different PR title prefix when automerge is false in multi-stage mode
         if config.multi_stage:
-            if config.automerge:
+            # In multi-stage, check if the user requested automerge (user intent)
+            user_requested_automerge = os.environ.get("AUTOMERGE", "true").lower() == "true"
+            if user_requested_automerge:
+                # If user wanted automerge, use regular prod sync format (workflow will find it)
                 pr_title_prefix = "[multi-stage] [prod sync]"
             else:
-                pr_title_prefix = "[multi-stage] [prod sync manual]"  # Different format that won't match the workflow search
+                # If user didn't want automerge, use manual format (workflow won't find it)
+                pr_title_prefix = "[multi-stage] [prod sync manual]"
         else:
             pr_title_prefix = "[prod sync]"
             
