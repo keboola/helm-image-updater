@@ -451,6 +451,74 @@ def test_invalid_extra_tag_format(cli_test_env, capsys):
     assert len(created_prs) == 0
 
 
+def test_valid_extra_tag_formats(cli_test_env, capsys):
+    """Test valid extra tag formats including semver.
+    
+    This test verifies that:
+    1. Extra tags with valid formats are accepted:
+       - dev- prefix
+       - production- prefix
+       - semver format (0.1.2)
+       - semver with v prefix (v0.1.2)
+    2. Tag updates are processed correctly
+    3. PRs are created as expected
+    """
+    base_dir, mock_repo, mock_github_repo = cli_test_env
+    
+    # Set environment variables with valid extra tag formats
+    os.environ["HELM_CHART"] = "test-chart"
+    os.environ["IMAGE_TAG"] = "dev-1.2.3"
+    os.environ["EXTRA_TAG1"] = "path1:dev-1.2.3"  # Standard dev format
+    os.environ["EXTRA_TAG2"] = "path2:1.2.3"      # Semver format without v
+    
+    # Track PRs
+    created_prs = []
+    def mock_create_pr(config, branch_name, pr_title, base="main"):
+        """Mock PR creation to track PR details."""
+        created_prs.append({"branch": branch_name, "title": pr_title, "base": base})
+        print(f"Created PR: {pr_title} (branch: {branch_name}, base: {base})")
+    
+    # Mock create_pr but use real config
+    with patch('helm_image_updater.tag_updater.create_pr', mock_create_pr):
+        # Run CLI
+        cli.main()
+    
+    # Check console output
+    captured = capsys.readouterr()
+    assert "Processing Helm chart: test-chart" in captured.out
+    assert "Extra tags to update:" in captured.out
+    assert "  - path1: dev-1.2.3" in captured.out
+    assert "  - path2: 1.2.3" in captured.out
+    
+    # Verify PR was created (dev tag should trigger a PR for dev stacks)
+    assert len(created_prs) == 1
+    assert "test-chart" in created_prs[0]["title"]
+    
+    # Run another test with v-prefixed semver
+    os.environ.clear()
+    os.environ["GH_TOKEN"] = "fake-token"
+    os.environ["HELM_CHART"] = "test-chart"
+    os.environ["IMAGE_TAG"] = "production-1.2.3"
+    os.environ["EXTRA_TAG1"] = "path1:v1.2.3"  # Semver format with v prefix
+    
+    created_prs.clear()
+    
+    # Mock create_pr but use real config
+    with patch('helm_image_updater.tag_updater.create_pr', mock_create_pr):
+        # Run CLI
+        cli.main()
+    
+    # Check console output
+    captured = capsys.readouterr()
+    assert "Processing Helm chart: test-chart" in captured.out
+    assert "Extra tags to update:" in captured.out
+    assert "  - path1: v1.2.3" in captured.out
+    
+    # Verify PR was created (production tag should trigger a PR for all stacks)
+    assert len(created_prs) == 1
+    assert "test-chart" in created_prs[0]["title"]
+
+
 def test_nonexistent_stack_override(cli_test_env, capsys):
     """Test error handling for non-existent override stack.
     
@@ -837,4 +905,77 @@ def test_happy_path_production_update(cli_test_env, capsys):
     
     # Verify our tracking shows PR was created with automerge enabled
     assert len(created_prs) == 1
-    assert created_prs[0]["automerge"] is True 
+    assert created_prs[0]["automerge"] is True
+
+
+def test_semver_main_image_tag(cli_test_env, capsys):
+    """Test that semver formats are accepted for the main IMAGE_TAG.
+    
+    This test verifies that:
+    1. IMAGE_TAG can be a semver with or without v prefix (0.1.2 or v0.1.2)
+    2. Semver tags are treated like production tags and update all stacks
+    3. PRs are created with the correct information
+    """
+    base_dir, mock_repo, mock_github_repo = cli_test_env
+    
+    # Set environment variables with semver image tag (no v prefix)
+    os.environ["HELM_CHART"] = "test-chart"
+    os.environ["IMAGE_TAG"] = "1.2.3"  # Semver without v prefix
+    
+    # Track PRs
+    created_prs = []
+    def mock_create_pr(config, branch_name, pr_title, base="main"):
+        """Mock PR creation to track PR details."""
+        created_prs.append({"branch": branch_name, "title": pr_title, "base": base})
+        print(f"Created PR: {pr_title} (branch: {branch_name}, base: {base})")
+    
+    # Mock create_pr but use real config
+    with patch('helm_image_updater.tag_updater.create_pr', mock_create_pr):
+        # Run CLI
+        cli.main()
+    
+    # Check console output
+    captured = capsys.readouterr()
+    assert "Processing Helm chart: test-chart" in captured.out
+    assert "New image tag: 1.2.3" in captured.out
+    
+    # Verify tag.yaml was updated in both dev and prod stacks (like production tag)
+    dev_tag_yaml = read_tag_yaml(base_dir / "dev-keboola-gcp-us-central1" / "test-chart" / "tag.yaml")
+    assert dev_tag_yaml["image"]["tag"] == "1.2.3"
+    
+    prod_tag_yaml = read_tag_yaml(base_dir / "com-keboola-prod" / "test-chart" / "tag.yaml")
+    assert prod_tag_yaml["image"]["tag"] == "1.2.3"
+    
+    # Verify PR was created
+    assert len(created_prs) == 1
+    assert "test-chart" in created_prs[0]["title"]
+    
+    # Test with v-prefixed semver
+    os.environ.clear()
+    os.environ["GH_TOKEN"] = "fake-token"
+    os.environ["HELM_CHART"] = "test-chart"
+    os.environ["IMAGE_TAG"] = "v2.3.4"  # Semver with v prefix
+    
+    # Reset mocks and stacks
+    created_prs.clear()
+    
+    # Mock create_pr but use real config
+    with patch('helm_image_updater.tag_updater.create_pr', mock_create_pr):
+        # Run CLI
+        cli.main()
+    
+    # Check console output
+    captured = capsys.readouterr()
+    assert "Processing Helm chart: test-chart" in captured.out
+    assert "New image tag: v2.3.4" in captured.out
+    
+    # Verify tag.yaml was updated in both dev and prod stacks (like production tag)
+    dev_tag_yaml = read_tag_yaml(base_dir / "dev-keboola-gcp-us-central1" / "test-chart" / "tag.yaml")
+    assert dev_tag_yaml["image"]["tag"] == "v2.3.4"
+    
+    prod_tag_yaml = read_tag_yaml(base_dir / "com-keboola-prod" / "test-chart" / "tag.yaml")
+    assert prod_tag_yaml["image"]["tag"] == "v2.3.4"
+    
+    # Verify PR was created
+    assert len(created_prs) == 1
+    assert "test-chart" in created_prs[0]["title"] 
