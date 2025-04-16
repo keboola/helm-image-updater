@@ -31,6 +31,7 @@ Dependencies:
 
 import logging
 import os
+import re
 import sys
 from pathlib import Path
 from git import Repo
@@ -92,10 +93,13 @@ def main():
         # Validate image_tag format if it's set
         if image_tag.strip():
             valid_prefixes = ["dev-", "production-"] + list(CANARY_STACKS.keys())
-            if not any(image_tag.startswith(prefix) for prefix in valid_prefixes):
+            if not (
+                any(image_tag.startswith(prefix) for prefix in valid_prefixes)
+                or re.match(r"^v?\d+\.\d+\.\d+$", image_tag)
+            ):
                 print(
                     "Invalid image tag format. Must start with 'dev-', 'production-', "
-                    f"or one of {', '.join(CANARY_STACKS.keys())}."
+                    f"be a semver (0.1.2 or v0.1.2), or one of {', '.join(CANARY_STACKS.keys())}."
                 )
                 sys.exit(1)
 
@@ -104,9 +108,10 @@ def main():
                 if not (
                     tag["value"].startswith("dev-")
                     or tag["value"].startswith("production-")
+                    or re.match(r"^v?\d+\.\d+\.\d+$", tag["value"])
                 ):
                     print(
-                        f"Invalid extra tag format for {tag['path']}: {tag['value']}. Must start with 'dev-' or 'production-'."
+                        f"Invalid extra tag format for {tag['path']}: {tag['value']}. Must start with 'dev-' or 'production-', or be a semver (0.1.2 or v0.1.2)."
                     )
                     sys.exit(1)
 
@@ -181,12 +186,23 @@ def main():
             any(image_tag.startswith(prefix) for prefix in CANARY_STACKS.keys())
             for tag in config.extra_tags
         )
+        extra_tags_contains_semver = config.extra_tags and any(
+            re.match(r"^v?\d+\.\d+\.\d+$", tag["value"]) for tag in config.extra_tags
+        )
 
         if override_stack:
             changes, missing_tags = update_stack_by_id(config, override_stack)
         elif image_tag.startswith("dev-") or extra_tags_contains_dev:
             changes, missing_tags = handle_dev_tag(config)
-        elif image_tag.startswith("production-") or extra_tags_contains_production:
+        elif (
+            # Production tag formats
+            image_tag.startswith("production-") or 
+            # Semver formats in main tag
+            re.match(r"^v?\d+\.\d+\.\d+$", image_tag) or 
+            # Extra tags with production or semver
+            extra_tags_contains_production or 
+            extra_tags_contains_semver
+        ):
             changes, missing_tags = handle_production_tag(config)
         elif (
             any(image_tag.startswith(prefix) for prefix in CANARY_STACKS.keys())
@@ -194,7 +210,7 @@ def main():
         ):
             changes, missing_tags = handle_canary_tag(config)
         else:
-            print("Invalid image tag format. Must start with 'dev-' or 'production-'.")
+            print("Invalid image tag format. Must start with 'dev-' or 'production-', or be a semver (0.1.2 or v0.1.2).")
             sys.exit(1)
 
         if dry_run:
