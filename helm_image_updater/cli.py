@@ -132,8 +132,48 @@ def main():
         github_client = Github(github_token)
         github_repo = github_client.get_repo(GITHUB_REPO)
 
+        # Check if this is a canary tag and switch to the appropriate branch first
+        is_canary_tag = False
+        canary_branch = None
+
+        # Check main image tag for canary prefixes
+        if image_tag:
+            for prefix, stack_info in CANARY_STACKS.items():
+                if image_tag.startswith(prefix):
+                    is_canary_tag = True
+                    canary_branch = stack_info["base_branch"]
+                    print(
+                        f"Detected canary tag with prefix '{prefix}', switching to branch '{canary_branch}'"
+                    )
+                    break
+
+        # Also check extra tags for canary prefixes
+        if not is_canary_tag and extra_tags:
+            for tag in extra_tags:
+                for prefix, stack_info in CANARY_STACKS.items():
+                    if tag["value"].startswith(prefix):
+                        is_canary_tag = True
+                        canary_branch = stack_info["base_branch"]
+                        print(
+                            f"Detected canary tag in extra_tags with prefix '{prefix}', switching to branch '{canary_branch}'"
+                        )
+                        break
+                if is_canary_tag:
+                    break
+
+        # Switch to canary branch if detected
+        if is_canary_tag and canary_branch:
+            try:
+                repo.git.checkout(canary_branch)
+                repo.git.pull("origin", canary_branch)
+                print(f"Successfully switched to branch '{canary_branch}'")
+            except Exception as e:
+                print(f"Warning: Could not switch to branch '{canary_branch}': {e}")
+                # Continue with current branch
+
         # Add debug logging for directory checking
         print(f"\nChecking for tag.yaml files in current directory: {os.getcwd()}")
+        print(f"Current branch: {repo.active_branch.name}")
         print(
             "Available directories:",
             [
@@ -196,12 +236,14 @@ def main():
             changes, missing_tags = handle_dev_tag(config)
         elif (
             # Production tag formats
-            image_tag.startswith("production-") or 
+            image_tag.startswith("production-")
+            or
             # Semver formats in main tag
-            re.match(r"^v?\d+\.\d+\.\d+$", image_tag) or 
+            re.match(r"^v?\d+\.\d+\.\d+$", image_tag)
+            or
             # Extra tags with production or semver
-            extra_tags_contains_production or 
-            extra_tags_contains_semver
+            extra_tags_contains_production
+            or extra_tags_contains_semver
         ):
             changes, missing_tags = handle_production_tag(config)
         elif (
@@ -210,7 +252,9 @@ def main():
         ):
             changes, missing_tags = handle_canary_tag(config)
         else:
-            print("Invalid image tag format. Must start with 'dev-' or 'production-', or be a semver (0.1.2 or v0.1.2).")
+            print(
+                "Invalid image tag format. Must start with 'dev-' or 'production-', or be a semver (0.1.2 or v0.1.2)."
+            )
             sys.exit(1)
 
         if dry_run:

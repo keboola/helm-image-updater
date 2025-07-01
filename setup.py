@@ -7,7 +7,7 @@ otherwise uses a default set of requirements.
 Example:
     To install the package:
         $ pip install .
-    
+
     To build the package:
         $ python setup.py sdist bdist_wheel
 

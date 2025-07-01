@@ -79,9 +79,10 @@ def test_setup_git_client_success(mock_repo, mock_github):
             * GitHub client is created with token
             * Correct repository is accessed
     """
-    with patch("helm_image_updater.git_operations.Repo") as mock_repo_class, patch(
-        "helm_image_updater.git_operations.Github"
-    ) as mock_github_class:
+    with (
+        patch("helm_image_updater.git_operations.Repo") as mock_repo_class,
+        patch("helm_image_updater.git_operations.Github") as mock_github_class,
+    ):
         mock_repo_class.return_value = mock_repo
         mock_github_class.return_value = mock_github
         mock_github.get_repo.return_value = Mock()

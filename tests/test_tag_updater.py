@@ -129,7 +129,7 @@ def create_tag_yaml(path, tag):
             "expected_stacks": [
                 "dev-keboola-gcp-us-central1",
                 "com-keboola-prod",
-                "cloud-keboola-prod"
+                "cloud-keboola-prod",
             ],
             "expected_base": "main",
         },
@@ -142,7 +142,7 @@ def create_tag_yaml(path, tag):
             "expected_stacks": [
                 "dev-keboola-gcp-us-central1",
                 "com-keboola-prod",
-                "cloud-keboola-prod"
+                "cloud-keboola-prod",
             ],
             "expected_base": "main",
         },
@@ -235,7 +235,7 @@ def test_tag_update_strategy(
     def mock_create_pr(config, branch_name, pr_title, base="main"):
         """Mock PR creation to track PR details."""
         created_prs.append({"branch": branch_name, "title": pr_title, "base": base})
-        print(f"\nCreated PR:")
+        print("\nCreated PR:")
         print(f"  - Branch: {branch_name}")
         print(f"  - Title: {pr_title}")
         print(f"  - Base: {base}")
@@ -341,7 +341,7 @@ def test_missing_tag_yaml(test_stacks):
     result = update_tag_yaml(test_stacks["dev_stack"], "test-chart", "dev-1.2.3")
 
     print("\nVerifying result...")
-    print(f"  - Expected: None (file missing)")
+    print("  - Expected: None (file missing)")
     print(f"  - Actual: {result}")
     assert result is None, "Should return None for missing tag.yaml"
 
@@ -490,7 +490,7 @@ def test_canary_tag_with_extra_tags(
     def mock_create_pr(config, branch_name, pr_title, base="main"):
         """Mock PR creation to track PR details."""
         created_prs.append({"branch": branch_name, "title": pr_title, "base": base})
-        print(f"\nCreated PR:")
+        print("\nCreated PR:")
         print(f"  - Branch: {branch_name}")
         print(f"  - Title: {pr_title}")
         print(f"  - Base: {base}")
@@ -529,24 +529,20 @@ def test_update_stack_by_id(test_stacks, mock_repo, mock_github_repo, monkeypatc
     print("\n" + "=" * 80)
     print("Running test: Update stack by ID")
     print("=" * 80)
-    
-    from helm_image_updater.tag_updater import update_stack_by_id
-    
+
     # Mock the create_pr function to avoid actual PR creation
     pr_created = []
+
     def mock_create_pr(config, branch_name, pr_title, base="main"):
         print(f"Would create PR: {pr_title} (branch: {branch_name}, base: {base})")
-        pr_created.append({
-            "branch": branch_name,
-            "title": pr_title,
-            "base": base
-        })
-    
+        pr_created.append({"branch": branch_name, "title": pr_title, "base": base})
+
     # Apply the mocks
     monkeypatch.setattr("helm_image_updater.tag_updater.create_pr", mock_create_pr)
-   
+
     # Create test config
     from helm_image_updater.config import UpdateConfig
+
     config = UpdateConfig(
         repo=mock_repo,
         github_repo=mock_github_repo,
@@ -554,25 +550,29 @@ def test_update_stack_by_id(test_stacks, mock_repo, mock_github_repo, monkeypatc
         image_tag="dev-1.2.3",
         automerge=True,
     )
-    
+
     # Test updating a dev stack with a dev tag
     print("\nUpdating dev stack with dev tag:")
-    updated_stacks, failed_stacks = update_stack_by_id(config, "dev-keboola-gcp-us-central1")
+    updated_stacks, failed_stacks = update_stack_by_id(
+        config, "dev-keboola-gcp-us-central1"
+    )
     assert len(updated_stacks) == 1, "Should return one updated stack"
     assert len(failed_stacks) == 0, "Should not have any failed stacks"
     assert updated_stacks[0]["stack"] == "dev-keboola-gcp-us-central1"
     assert len(pr_created) == 1, "Should create a PR"
-    
+
     # Test updating a dev stack with a custom tag (not starting with dev- or production-)
     print("\nUpdating dev stack with custom tag:")
     config.image_tag = "custom-1.2.3"
     pr_created.clear()
-    updated_stacks, failed_stacks = update_stack_by_id(config, "dev-keboola-gcp-us-central1")
+    updated_stacks, failed_stacks = update_stack_by_id(
+        config, "dev-keboola-gcp-us-central1"
+    )
     assert len(updated_stacks) == 1, "Should return one updated stack"
     assert len(failed_stacks) == 0, "Should not have any failed stacks"
     assert updated_stacks[0]["stack"] == "dev-keboola-gcp-us-central1"
     assert len(pr_created) == 1, "Should create a PR"
-    
+
     # Test updating a production stack with a production tag
     print("\nUpdating production stack with production tag:")
     config.image_tag = "production-1.2.3"
@@ -582,21 +582,27 @@ def test_update_stack_by_id(test_stacks, mock_repo, mock_github_repo, monkeypatc
     assert len(failed_stacks) == 0, "Should not have any failed stacks"
     assert updated_stacks[0]["stack"] == "com-keboola-prod"
     assert len(pr_created) == 1, "Should create a PR"
-    
+
     # Test incompatible tag and stack (non-production tag with production stack)
     print("\nTesting incompatible tag and stack:")
     config.image_tag = "custom-1.2.3"
     pr_created.clear()
     updated_stacks, failed_stacks = update_stack_by_id(config, "com-keboola-prod")
-    assert len(updated_stacks) == 0, "Should not have any updated stacks for incompatible tag and stack"
-    assert len(failed_stacks) == 0, "Should not have any failed stacks for incompatible tag and stack"
+    assert len(updated_stacks) == 0, (
+        "Should not have any updated stacks for incompatible tag and stack"
+    )
+    assert len(failed_stacks) == 0, (
+        "Should not have any failed stacks for incompatible tag and stack"
+    )
     assert len(pr_created) == 0, "Should not create a PR"
-    
+
     # Test updating a E2E stack with a build tag
     print("\nUpdating E2E stack with build tag:")
     config.image_tag = "martin-dev-1.2.3"
     pr_created.clear()
-    updated_stacks, failed_stacks = update_stack_by_id(config, "dev-keboola-gcp-us-east1-e2e")
+    updated_stacks, failed_stacks = update_stack_by_id(
+        config, "dev-keboola-gcp-us-east1-e2e"
+    )
     assert len(updated_stacks) == 1, "Should return one updated stack"
     assert len(failed_stacks) == 0, "Should not have any failed stacks"
     assert updated_stacks[0]["stack"] == "dev-keboola-gcp-us-east1-e2e"
