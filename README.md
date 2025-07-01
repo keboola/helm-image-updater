@@ -240,6 +240,65 @@ Run tests:
     pip install pytest
     pytest tests/
 
+### Testing Changes in sre-playground
+
+To test your changes in the real environment (sre-playground repository) before creating a release:
+
+1. **Modify action.yaml** to use source code instead of release:
+
+   ```yaml
+   # Comment out the release downloader
+   # - uses: robinraju/release-downloader@v1.9
+   #   with:
+   #     repository: "keboola/helm-image-updater"
+   #     latest: true
+
+   # Add source checkout and installation
+   - name: Checkout helm-image-updater source
+     uses: actions/checkout@v4
+     with:
+       repository: keboola/helm-image-updater
+       ref: your-feature-branch-name  # Replace with your branch
+       path: helm-image-updater-src
+
+   - name: Install helm-image-updater from source
+     shell: bash
+     run: |
+       echo "Installing helm-image-updater from source code..."
+       cd helm-image-updater-src
+       pip install -e .
+   ```
+
+   And update the final step to remove the pip install line:
+
+   ```yaml
+   - name: Update image tags and create PRs
+     shell: bash
+     env:
+       # ... environment variables ...
+     run: |
+       # pip install helm_image_updater-*.tar.gz  # Comment this out
+       helm-image-updater
+   ```
+
+2. **Commit and push your feature branch** with the changes
+
+3. **In sre-playground**, update the workflow to use your branch:
+
+   ```yaml
+   - uses: keboola/helm-image-updater@your-feature-branch
+     with:
+       helm-chart: metastore
+       image-tag: canary-orion-metastore-0.0.5
+       github-token: ${{ secrets.GITHUB_TOKEN }}
+   ```
+
+4. **Test your changes** by running the workflow in sre-playground
+
+5. **When satisfied**, revert the action.yaml changes and create a proper release
+
+This approach allows you to test fixes in the "real" environment without needing to create releases for testing purposes.
+
 ## Testing
 
 The test suite verifies the following functionality:
