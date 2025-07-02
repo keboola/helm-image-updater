@@ -205,7 +205,7 @@ def update_dev_stack(config: UpdateConfig):
                     pr_title_prefix = "[multi-stage] [test sync manual]"
             else:
                 pr_title_prefix = "[test sync]"
-                
+
             create_pr(
                 config,
                 branch_name,
@@ -271,7 +271,7 @@ def update_production_stacks(config: UpdateConfig):
                 "-m",
                 f"Update {config.helm_chart} to {image_tag_str} in all stacks",
             )
-        
+
         # Use a different PR title prefix when automerge is false in multi-stage mode
         if config.multi_stage:
             # In multi-stage, check the original user automerge intent
@@ -283,7 +283,7 @@ def update_production_stacks(config: UpdateConfig):
                 pr_title_prefix = "[multi-stage] [prod sync manual]"
         else:
             pr_title_prefix = "[prod sync]"
-            
+
         create_pr(
             config,
             branch_name,
@@ -469,9 +469,8 @@ def update_canary_stack(config: UpdateConfig):
         f"{config.helm_chart}-{canary_type}-{config.image_tag}-{random_suffix()}"
     )
     if not config.dry_run:
-        # Checkout and pull the correct base branch
-        config.repo.git.checkout(base_branch)
-        config.repo.git.pull("origin", base_branch)
+        # We should already be on the correct base branch from CLI logic
+        # Just create a new branch from current position
         config.repo.git.checkout("-b", branch_name)
 
     changes = []
@@ -586,15 +585,15 @@ def handle_canary_tag(config: UpdateConfig):
 
 def update_stack_by_id(config: UpdateConfig, stack_id: str):
     """Update a single selected stack with the new image tag.
-    
+
     This function respects the tag conventions:
     - Any tag can go to dev stacks
     - Only production- tags can go to production stacks
-    
+
     Args:
         config (UpdateConfig): The configuration object.
         stack_id (str): The ID of the stack to update.
-        
+
     Returns:
         tuple: A tuple containing a list of changes and a list of missing tag.yaml files.
     """
@@ -602,7 +601,7 @@ def update_stack_by_id(config: UpdateConfig, stack_id: str):
     if not os.path.isdir(stack_id) or stack_id in IGNORED_FOLDERS:
         print(f"Stack {stack_id} does not exist or is in ignored folders")
         return [], []
-    
+
     extra_tags = config.extra_tags or []
     all_tags = [tag["value"] for tag in extra_tags]
     all_tags.append(config.image_tag)
@@ -612,7 +611,7 @@ def update_stack_by_id(config: UpdateConfig, stack_id: str):
         if not all(tag.startswith("production-") for tag in all_tags):
             print(f"Cannot apply non-production tag to production stack {stack_id}")
             return [], []
-    
+
     # Update the tag.yaml file
     tag_file_path = f"{stack_id}/{config.helm_chart}/tag.yaml"
     result = update_tag_yaml(
@@ -623,42 +622,46 @@ def update_stack_by_id(config: UpdateConfig, stack_id: str):
         dry_run=config.dry_run,
         commit_sha=config.commit_sha,
     )
-    
+
     if result is None:
         print(f"Missing tag.yaml file for {stack_id}/{config.helm_chart}")
         return [], []
     elif not result:
         print(f"No changes needed for {stack_id}")
         return [], []
-    
+
     # Create a branch and PR if not in dry run mode
     if not config.dry_run:
         # Create a branch for the changes
-        branch_name = f"{config.helm_chart}-{stack_id}-{config.image_tag}-{random_suffix()}"
+        branch_name = (
+            f"{config.helm_chart}-{stack_id}-{config.image_tag}-{random_suffix()}"
+        )
         config.repo.git.checkout("-b", branch_name)
-        
+
         # Add and commit the changes
         config.repo.git.add(tag_file_path)
-        
+
         image_tag_str = (f"{config.image_tag}" if config.image_tag else "") + "".join(
             f" {tag['path']}@{tag['value']}" for tag in (config.extra_tags or [])
         )
-        
+
         config.repo.git.commit(
             "-m", f"Update {config.helm_chart} to {image_tag_str} in {stack_id}"
         )
-        
+
         # Create PR
         create_pr(
             config,
             branch_name,
             f"Update {config.helm_chart} to {image_tag_str} in {stack_id}",
         )
-    
+
     # Return update information
-    return [{
-        "stack": stack_id,
-        "chart": config.helm_chart,
-        "tag": config.image_tag,
-        "automerge": config.automerge,
-    }], []
+    return [
+        {
+            "stack": stack_id,
+            "chart": config.helm_chart,
+            "tag": config.image_tag,
+            "automerge": config.automerge,
+        }
+    ], []
