@@ -30,10 +30,6 @@ CANARY_STACKS = {
         "stack": "dev-keboola-canary-orion",
         "base_branch": "canary-orion",
     },
-    "canary-ursa": {
-        "stack": "dev-keboola-canary-ursa",
-        "base_branch": "canary-ursa"
-    },
 }
 IGNORED_FOLDERS = {".venv", "aws", ".git", ".github"}
 GITHUB_REPO = os.getenv("GITHUB_REPOSITORY", "keboola/kbc-stacks")
