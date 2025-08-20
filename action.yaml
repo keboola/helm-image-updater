@@ -68,7 +68,7 @@ runs:
         git fetch --all --prune
         
         # Setup canary branches
-        for branch in canary-orion canary-ursa; do
+        for branch in canary-orion; do
           if git ls-remote --heads origin $branch | grep -q "$branch"; then
             git checkout -B $branch origin/$branch
           fi

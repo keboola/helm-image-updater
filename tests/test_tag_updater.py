@@ -74,10 +74,6 @@ def test_stacks(tmp_path):
     (canary_orion / "test-chart").mkdir()
     create_tag_yaml(canary_orion / "test-chart" / "tag.yaml", "old-tag")
 
-    canary_ursa = tmp_path / "dev-keboola-canary-ursa"
-    canary_ursa.mkdir()
-    (canary_ursa / "test-chart").mkdir()
-    create_tag_yaml(canary_ursa / "test-chart" / "tag.yaml", "old-tag")
 
     return {
         "base_dir": tmp_path,
@@ -85,7 +81,6 @@ def test_stacks(tmp_path):
         "com_stack": com_stack,
         "cloud_stack": cloud_stack,
         "canary_orion": canary_orion,
-        "canary_ursa": canary_ursa,
     }
 
 
@@ -168,15 +163,6 @@ def create_tag_yaml(path, tag):
             "expected_stacks": ["dev-keboola-canary-orion"],
             "expected_base": "canary-orion",
         },
-        {
-            "name": "Canary Ursa tag should create a PR targeting the canary-ursa branch",
-            "image_tag": "canary-ursa-1.2.3",
-            "automerge": False,  # Should be ignored for canary (always auto-merges)
-            "multi_stage": False,
-            "expected_pr_count": 1,
-            "expected_stacks": ["dev-keboola-canary-ursa"],
-            "expected_base": "canary-ursa",
-        },
     ],
 )
 def test_tag_update_strategy(
@@ -212,7 +198,6 @@ def test_tag_update_strategy(
             "com-keboola-prod",
             "cloud-keboola-prod",
             "dev-keboola-canary-orion",
-            "dev-keboola-canary-ursa",
             ".git",
         ]
 

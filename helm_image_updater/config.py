@@ -24,15 +24,11 @@ from github.Repository import Repository
 
 # Constants
 DEV_STACKS = ["dev-keboola-gcp-us-central1"]
-EXCLUDED_STACKS = ["dev-keboola-gcp-us-east1-e2e"]
+EXCLUDED_STACKS = ["dev-keboola-gcp-us-east1-e2e", "dev-keboola-azure-east-us-2-e2e", "dev-keboola-aws-us-east-1-e2e"]
 CANARY_STACKS = {
     "canary-orion": {
         "stack": "dev-keboola-canary-orion",
         "base_branch": "canary-orion",
-    },
-    "canary-ursa": {
-        "stack": "dev-keboola-canary-ursa",
-        "base_branch": "canary-ursa"
     },
 }
 IGNORED_FOLDERS = {".venv", "aws", ".git", ".github"}

@@ -46,7 +46,7 @@ Required:
 
 - `HELM_CHART`: Name of the Helm chart to update
 - `GH_TOKEN`: GitHub access token for authentication
-- `IMAGE_TAG`: New image tag to set (must start with 'dev-', 'production-', 'canary-orion-', or 'canary-ursa-')
+- `IMAGE_TAG`: New image tag to set (must start with 'dev-', 'production-', or 'canary-orion-')
 
 Optional:
 
@@ -188,7 +188,7 @@ Image tags must follow these formats:
 
 - Development: `dev-*` (e.g., `dev-b10536c41180e420eaf083451a1ddee132f512c6`)
 - Production: `production-*` (e.g., `production-b10536c41180e420eaf083451a1ddee132f512c6`)
-- Canary: `canary-*` (e.g., `canary-orion-b10536c41180e420eaf083451a1ddee132f512c6`, `canary-ursa-b10536c41180e420eaf083451a1ddee132f512c6`)
+- Canary: `canary-*` (e.g., `canary-orion-b10536c41180e420eaf083451a1ddee132f512c6`)
 
 ## Stack Types
 
@@ -213,7 +213,7 @@ Image tags must follow these formats:
 
 - Updates only the specific canary stack matching the tag prefix
 - Always auto-merges regardless of the `automerge` setting
-- Uses stack-specific base branches (e.g., `canary-orion`, `canary-ursa`)
+- Uses stack-specific base branches (e.g., `canary-orion`)
 - Supports extra tags for complex configurations
 
 ## Multi-Stage Deployment
