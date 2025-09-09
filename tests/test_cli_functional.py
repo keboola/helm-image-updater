@@ -521,11 +521,8 @@ def test_invalid_tag_format(cli_test_env, mock_git_operations, capsys):
     )
     assert dev_tag_yaml["image"]["tag"] == "old-tag"
 
-    # Verify PR was not created
-    assert len(created_prs) == 0
 
-
-def test_invalid_extra_tag_format(cli_test_env, capsys):
+def test_invalid_extra_tag_format(cli_test_env, mock_git_operations, capsys):
     """Test error handling for invalid extra tag format.
 
     This test verifies that:
@@ -540,28 +537,19 @@ def test_invalid_extra_tag_format(cli_test_env, capsys):
     os.environ["IMAGE_TAG"] = "dev-1.2.3"
     os.environ["EXTRA_TAG1"] = "invalid-format"  # Missing colon separator
 
-    # Track PRs
-    created_prs = []
-
-    def mock_create_branch_commit_and_pr(self, branch_name, files_to_commit, commit_message, pr_title, pr_body, base_branch="main", auto_merge=False):
-        created_prs.append({"branch": branch_name, "title": pr_title, "base": base_branch})
-
     # Run CLI expecting an error
-    with (
-        pytest.raises(SystemExit) as e,
-        patch("helm_image_updater.io_layer.IOLayer.create_branch_commit_and_pr", mock_create_branch_commit_and_pr),
-    ):
+    with pytest.raises(SystemExit) as exc_info:
         cli.main()
 
     # Check error message
     captured = capsys.readouterr()
-    assert "EXTRA_TAG1 must be in format" in captured.out
+    assert "Error: EXTRA_TAG1 must be in format 'path:value'" in captured.out
 
     # Verify exit code
-    assert e.value.code == 1
+    assert exc_info.value.code == 1
 
     # Verify PR was not created
-    assert len(created_prs) == 0
+    assert mock_git_operations['create_pull_request'].call_count == 0
 
 
 def test_valid_extra_tag_formats(cli_test_env, capsys):

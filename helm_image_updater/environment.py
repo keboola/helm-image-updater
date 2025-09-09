@@ -24,6 +24,7 @@ class EnvironmentConfig:
     override_stack: str = ""
     extra_tags: List[Dict[str, str]] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
+    _extra_tag_errors: List[int] = field(default_factory=list, init=False, repr=False)
     
     @classmethod
     def from_env(cls, env: Dict[str, str]) -> "EnvironmentConfig":
@@ -37,12 +38,16 @@ class EnvironmentConfig:
         """
         # Parse extra tags
         extra_tags = []
+        extra_tag_errors = []  # Track format errors for validation
         for i in range(1, 3):
             if tag_str := env.get(f"EXTRA_TAG{i}", "").strip():
                 if ":" in tag_str:
                     path, value = tag_str.split(":", 1)
                     if value.strip():
                         extra_tags.append({"path": path, "value": value.strip()})
+                else:
+                    # Invalid format - missing colon separator
+                    extra_tag_errors.append(i)
         
         # Parse metadata if provided
         metadata = {}
@@ -54,7 +59,7 @@ class EnvironmentConfig:
             except Exception:
                 pass  # Ignore invalid metadata
         
-        return cls(
+        config = cls(
             helm_chart=env.get("HELM_CHART", ""),
             image_tag=env.get("IMAGE_TAG", "").strip(),
             github_token=env.get("GH_TOKEN", ""),
@@ -67,6 +72,8 @@ class EnvironmentConfig:
             extra_tags=extra_tags,
             metadata=metadata
         )
+        config._extra_tag_errors = extra_tag_errors
+        return config
     
     def validate(self) -> List[str]:
         """Validate the configuration.
@@ -93,6 +100,10 @@ class EnvironmentConfig:
             tag_type = detect_tag_type(self.image_tag)
             if tag_type == TagType.INVALID:
                 errors.append(f"Invalid IMAGE_TAG format: '{self.image_tag}'. Must start with 'dev-', 'production-', 'canary-' or be a valid semver (e.g., 1.2.3)")
+        
+        # Check for extra tag format errors (missing colon)
+        for i in self._extra_tag_errors:
+            errors.append(f"EXTRA_TAG{i} must be in format 'path:value'")
         
         # Validate extra tag format
         for i, tag in enumerate(self.extra_tags, 1):
