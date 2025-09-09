@@ -190,7 +190,7 @@ def test_cli_environment_variables(cli_test_env, capsys):
 # -----------------------------------------------------------------------------
 
 
-def test_dev_tag_update(cli_test_env, capsys):
+def test_dev_tag_update(cli_test_env, mock_git_operations, capsys):
     """Test updating dev stacks with a dev tag.
 
     This test verifies that:
@@ -205,23 +205,29 @@ def test_dev_tag_update(cli_test_env, capsys):
     os.environ["IMAGE_TAG"] = "dev-1.2.3"
     os.environ["AUTOMERGE"] = "true"
 
-    # Track PRs created by mocking the GitHub PR creation directly
+    # Track PR creation calls
     created_prs = []
-    
-    def track_pr_creation(*args, **kwargs):
-        pr_mock = Mock()
-        pr_mock.html_url = "https://github.com/mock-org/mock-repo/pull/123"
-        pr_mock.number = 123
-        pr_mock.mergeable = True
-        
-        # Extract title from the call
-        title = kwargs.get('title', 'Unknown Title')
-        created_prs.append({"title": title, "base": kwargs.get('base', 'main')})
-        return pr_mock
-    
-    mock_github_repo.create_pull = Mock(side_effect=track_pr_creation)
 
-    # Run CLI
+    def track_pr_creation(*args, **kwargs):
+        """Track GitHub PR creation details."""
+        # Extract arguments (self, title, body, branch_name, base_branch="main", auto_merge=False)
+        if len(args) >= 4:
+            title, body, branch_name = args[1], args[2], args[3]
+            base_branch = args[4] if len(args) > 4 else kwargs.get("base_branch", "main")
+        else:
+            title = kwargs.get("title", "Unknown")
+            body = kwargs.get("body", "")
+            branch_name = kwargs.get("branch_name", "unknown-branch")
+            base_branch = kwargs.get("base_branch", "main")
+        
+        created_prs.append({"branch": branch_name, "title": title, "base": base_branch})
+        print(f"Created PR: {title} (branch: {branch_name}, base: {base_branch})")
+        return "https://github.com/mock-org/mock-repo/pull/123"
+
+    # Customize the PR creation mock to track calls
+    mock_git_operations['create_pull_request'].side_effect = track_pr_creation
+
+    # Run CLI - files will be written, Git/GitHub operations mocked
     cli.main()
 
     # Check console output
@@ -230,9 +236,11 @@ def test_dev_tag_update(cli_test_env, capsys):
     assert "New image tag: dev-1.2.3" in captured.out
     assert "Updating dev stacks (dev- tag)" in captured.out
 
-    # The issue is that the CLI claims to update files but doesn't actually write them
-    # This suggests a problem in the new plan/execute architecture
-    # For now, let's check that the console output indicates the right files would be updated
+     # Verify tag.yaml was updated in dev stack
+    dev_tag_yaml = read_tag_yaml(
+        base_dir / "dev-keboola-gcp-us-central1" / "test-chart" / "tag.yaml"
+    )
+    assert dev_tag_yaml["image"]["tag"] == "dev-1.2.3"
     assert "Updated dev-keboola-gcp-us-central1/test-chart/tag.yaml" in captured.out
 
     # Verify tag.yaml was NOT updated in prod stack
@@ -241,6 +249,12 @@ def test_dev_tag_update(cli_test_env, capsys):
     )
     assert prod_tag_yaml["image"]["tag"] == "old-tag"
 
+    # Verify Git operations were performed
+    assert mock_git_operations['checkout_branch'].called, "git checkout should be called"
+    assert mock_git_operations['add_files'].called, "git add should be called"
+    assert mock_git_operations['commit'].called, "git commit should be called"
+    assert mock_git_operations['create_pull_request'].called, "create PR should be called"
+    
     # Verify PR was created
     assert len(created_prs) == 1
     assert "test-chart" in created_prs[0]["title"]
@@ -290,6 +304,7 @@ def test_production_tag_update(cli_test_env, mock_git_operations, capsys):
     # Check console output
     captured = capsys.readouterr()
     assert "Processing Helm chart: test-chart" in captured.out
+    assert "Updating all stacks (production- tag)" in captured.out
     assert "New image tag:" in captured.out
 
     # Verify tag.yaml was updated in both dev and prod stacks
@@ -362,10 +377,26 @@ def test_canary_tag_update(cli_test_env, capsys):
     assert "Processing Helm chart: test-chart" in captured.out
     assert "Detected canary tag, switching to branch 'canary-orion'" in captured.out
     assert "Successfully switched to branch 'canary-orion'" in captured.out
+    assert "Updating canary stack" in captured.out
     assert "New image tag:" in captured.out
-
-    # Verify console output shows the correct update
     assert "Updated dev-keboola-canary-orion/test-chart/tag.yaml: image.tag from old-tag to canary-orion-1.2.3" in captured.out
+
+    # Verify tag.yaml was updated only in canary stack
+    canary_tag_yaml = read_tag_yaml(
+        base_dir / "dev-keboola-canary-orion" / "test-chart" / "tag.yaml"
+    )
+    assert canary_tag_yaml["image"]["tag"] == "canary-orion-1.2.3"
+
+    # Verify other stacks were NOT updated
+    dev_tag_yaml = read_tag_yaml(
+        base_dir / "dev-keboola-gcp-us-central1" / "test-chart" / "tag.yaml"
+    )
+    assert dev_tag_yaml["image"]["tag"] == "old-tag"
+
+    prod_tag_yaml = read_tag_yaml(
+        base_dir / "com-keboola-prod" / "test-chart" / "tag.yaml"
+    )
+    assert prod_tag_yaml["image"]["tag"] == "old-tag"    
 
     # Verify PR was created against canary branch
     assert len(created_prs) == 1
@@ -408,9 +439,12 @@ def test_canary_tag_update(cli_test_env, capsys):
         "tag.yaml for chart metastore does not exist in any stack" not in captured.out
     )
     assert "New image tag:" in captured.out
-
-    # Verify console output shows the correct update for canary-only service
+    assert "Updating canary stack" in captured.out
     assert "Updated dev-keboola-canary-orion/metastore/tag.yaml: image.tag from old-canary-tag to canary-orion-metastore-0.0.5" in captured.out
+
+    # Verify the canary-only service was updated
+    metastore_tag_yaml = read_tag_yaml(metastore_canary_dir / "tag.yaml")
+    assert metastore_tag_yaml["image"]["tag"] == "canary-orion-metastore-0.0.5"    
 
     # Verify PR was created for canary-only service
     assert len(created_prs) == 1
