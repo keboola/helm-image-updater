@@ -76,19 +76,15 @@ def _execute_pr_plans(plan: UpdatePlan, io_layer: IOLayer, result: ExecutionResu
             print(f"  Auto-merge: {pr_plan.auto_merge}")
             print(f"  Files: {', '.join(pr_plan.files_to_commit)}")
         else:
-            # Prepare files to commit
-            files_to_commit = {}
-            for file_path in pr_plan.files_to_commit:
-                # Find the corresponding file change
-                for file_change in plan.file_changes:
-                    if file_change.file_path == file_path:
-                        files_to_commit[file_path] = file_change.new_content
-                        break
+            # Step 1: Write files to disk first
+            relevant_file_changes = [fc for fc in plan.file_changes 
+                                   if fc.file_path in pr_plan.files_to_commit]
+            io_layer.write_file_changes(relevant_file_changes)
             
-            # Create branch, commit, and PR
+            # Step 2: Create branch, commit, and PR (files already exist on disk)
             pr_url = io_layer.create_branch_commit_and_pr(
                 branch_name=pr_plan.branch_name,
-                files_to_commit=files_to_commit,
+                files_to_commit=pr_plan.files_to_commit,  # List[str] - just paths
                 commit_message=pr_plan.commit_message,
                 pr_title=pr_plan.pr_title,
                 pr_body=pr_plan.pr_body,

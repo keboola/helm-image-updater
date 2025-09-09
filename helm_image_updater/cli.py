@@ -42,7 +42,7 @@ def main():
         
         # Handle target path change
         if config.target_path != ".":
-            print(f"Changed to directory: {config.target_path}")
+            print(f"Changing to target directory: {config.target_path}")
             os.chdir(config.target_path)
         
         # Step 3: Setup I/O layer
@@ -55,43 +55,27 @@ def main():
         plan = prepare_plan(config, io_layer)
         
         # Step 5: Execute plan (writes files, creates PRs)
-        if plan.has_changes():
-            result = execute_plan(plan, io_layer)
-            
-            # Handle execution results
-            if not result.success:
-                for error in result.errors:
-                    print(f"Error: {error}")
-                sys.exit(1)
-            
-            # Show results
-            if result.pr_urls:
-                print(f"Created {len(result.pr_urls)} PR(s):")
-                for url in result.pr_urls:
-                    print(f"  - {url}")
-        else:
-            if config.dry_run:
-                print_dry_run_summary([], [])
+        result = execute_plan(plan, io_layer)
+        
+        # Handle execution results
+        if not result.success:
+            for error in result.errors:
+                print(f"Error: {error}")
+            sys.exit(1)
+        
+        # Show results
+        if result.pr_urls:
+            print(f"Created {len(result.pr_urls)} PR(s):")
+            for url in result.pr_urls:
+                print(f"  - {url}")
+        elif config.dry_run and not plan.has_changes():
+            print("\nDry run summary:")
+            print("No changes needed - all tag files are already up to date.")
         
         print("Image tag update process completed")        
     except Exception as e:
         print(f"Unexpected error: {e}")
         sys.exit(1)
-
-def print_dry_run_summary(changes, missing_tags):
-    """Print a summary of changes that would be made in dry run mode."""
-    print("\nDry run summary:")
-    print("Changes that would be made:")
-    for change in changes:
-        print(f"- Stack: {change['stack']}")
-        print(f"  Chart: {change['chart']}")
-        print(f"  Tag: {change['tag']}")
-        print(f"  Auto-merge: {change['automerge']}")
-
-    if missing_tags:
-        print("\nMissing tag.yaml files:")
-        for missing in missing_tags:
-            print(f"- {missing}")
 
 if __name__ == "__main__":
     main()

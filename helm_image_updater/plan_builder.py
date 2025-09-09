@@ -144,10 +144,11 @@ def _select_target_stacks(
     
     if strategy == UpdateStrategy.CANARY:
         # Find matching canary stack
-        canary_prefix = config.image_tag.split('-')[1] if config.image_tag else ""
-        for prefix, stack in CANARY_STACKS.items():
-            if prefix == canary_prefix:
-                return [stack] if stack in all_stacks else []
+        canary_tag_prefix = f"canary-{config.image_tag.split('-')[1]}" if config.image_tag and len(config.image_tag.split('-')) > 1 else ""
+        for prefix, canary_config in CANARY_STACKS.items():
+            if prefix == canary_tag_prefix:
+                stack_name = canary_config["stack"]
+                return [stack_name] if stack_name in all_stacks else []
         return []
     
     return []
@@ -429,9 +430,10 @@ def _create_pr_plan(pr_group: Dict[str, Any], plan: UpdatePlan, config: Environm
 def _get_canary_base_branch(image_tag: str) -> str:
     """Get the base branch for a canary deployment."""
     if image_tag and image_tag.startswith("canary-"):
-        parts = image_tag.split('-')
-        if len(parts) >= 2:
-            return f"canary-{parts[1]}"
+        canary_tag_prefix = f"canary-{image_tag.split('-')[1]}" if len(image_tag.split('-')) > 1 else ""
+        for prefix, canary_config in CANARY_STACKS.items():
+            if prefix == canary_tag_prefix:
+                return canary_config["base_branch"]
     return "main"
 
 

@@ -91,6 +91,34 @@ class IOLayer:
         
         return True
     
+    def write_file_changes(self, file_changes) -> bool:
+        """Write multiple file changes to disk.
+        
+        Args:
+            file_changes: List of FileChange objects to write
+            
+        Returns:
+            True if files were written, False if dry run
+        """
+        if self.dry_run:
+            for file_change in file_changes:
+                print(f"[DRY RUN] Would write to {file_change.file_path}")
+            return False
+        
+        for file_change in file_changes:
+            if file_change.file_path.endswith(('.yaml', '.yml')):
+                # For YAML files, parse and write properly
+                data = yaml.safe_load(file_change.new_content)
+                self.write_yaml(file_change.file_path, data)
+            else:
+                # For other files, write as text
+                file_path = Path(file_change.file_path)
+                file_path.parent.mkdir(parents=True, exist_ok=True)
+                with file_path.open('w') as f:
+                    f.write(file_change.new_content)
+        
+        return True
+    
     # -----------------------------------------------------------------------------
     # Git Operations
     # -----------------------------------------------------------------------------
@@ -296,6 +324,8 @@ class IOLayer:
         3. Pushing the branch
         4. Creating a PR
         
+        Note: Files must already exist on disk before calling this method.
+        
         Args:
             branch_name: Name for the new branch
             files_to_commit: List of file paths to commit
@@ -311,7 +341,7 @@ class IOLayer:
         # Create and checkout branch
         self.checkout_branch(branch_name, create=True)
         
-        # Add and commit files
+        # Add and commit files (files should already exist on disk)
         self.add_files(files_to_commit)
         self.commit(commit_message)
         
@@ -323,7 +353,3 @@ class IOLayer:
             base_branch=base_branch,
             auto_merge=auto_merge
         )
-    
-        
-        return True
-    
