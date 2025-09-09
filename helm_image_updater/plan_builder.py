@@ -40,7 +40,7 @@ def prepare_plan(config: EnvironmentConfig, io_layer: IOLayer) -> UpdatePlan:
         print(f"Successfully switched to branch 'canary-{canary_prefix}'")
         print("Updating canary stack")
     elif strategy == UpdateStrategy.OVERRIDE:
-        print(f"Override mode: targeting specific stack {config.override_stack}")
+        print(f"Override stack: {config.override_stack}")
     
     # Create base plan
     plan = UpdatePlan(

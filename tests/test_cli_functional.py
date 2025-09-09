@@ -651,7 +651,7 @@ def test_nonexistent_stack_override(cli_test_env, capsys):
 
     # Check console output
     captured = capsys.readouterr()
-    assert "Override mode: targeting specific stack non-existent-stack" in captured.out
+    assert "Override stack: non-existent-stack" in captured.out
     assert "No stacks found for strategy override" in captured.out
 
     # Verify tag.yaml files were not modified
