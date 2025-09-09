@@ -36,6 +36,10 @@ def main():
         print(f"Processing Helm chart: {config.helm_chart}")
         if config.image_tag:
             print(f"New image tag: {config.image_tag}")
+        if config.extra_tags:
+            print("Extra tags to update:")
+            for tag in config.extra_tags:
+                print(f"  - {tag['path']}: {tag['value']}")
         print(f"Automerge: {config.automerge}")
         print(f"Dry run: {config.dry_run}")
         print(f"Multi-stage deployment: {config.multi_stage}")
