@@ -101,6 +101,19 @@ class EnvironmentConfig:
             if tag_type == TagType.INVALID:
                 errors.append(f"Invalid IMAGE_TAG format: '{self.image_tag}'. Must start with 'dev-', 'production-', 'canary-' or be a valid semver (e.g., 1.2.3)")
         
+        # Check for dev tag on production stack (even with override)
+        if self.override_stack and self.image_tag:
+            import os
+            from .stack_classification import classify_stack
+            
+            # Only validate if the stack actually exists on disk
+            if os.path.isdir(self.override_stack):
+                tag_type = detect_tag_type(self.image_tag)
+                stack_classification = classify_stack(self.override_stack)
+                # Check if it's a dev tag being applied to a production stack
+                if tag_type == TagType.DEV and stack_classification.is_production:
+                    errors.append("Cannot apply non-production tag to production stack")
+        
         # Check for extra tag format errors (missing colon)
         for i in self._extra_tag_errors:
             errors.append(f"EXTRA_TAG{i} must be in format 'path:value'")

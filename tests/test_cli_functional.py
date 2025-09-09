@@ -951,15 +951,16 @@ def test_dev_tag_with_production_override_stack(cli_test_env, capsys):
         print(f"Created PR: {pr_title} (branch: {branch_name}, base: {base_branch})")
         return "https://github.com/mock-org/mock-repo/pull/123"
 
-    # Mock create_pr but use real config
-    with patch("helm_image_updater.io_layer.IOLayer.create_branch_commit_and_pr", mock_create_branch_commit_and_pr):
-        # Run CLI
+    # Run CLI expecting an error due to validation
+    with pytest.raises(SystemExit) as exc_info:
         cli.main()
-
-    # Check console output
+    
+    # Check error message
     captured = capsys.readouterr()
-    assert "Processing Helm chart: test-chart" in captured.out
-    assert "Cannot apply non-production tag to production stack" in captured.out
+    assert "Error: Cannot apply non-production tag to production stack" in captured.out
+
+    # Verify exit code
+    assert exc_info.value.code == 1
 
     # Verify tag.yaml was NOT updated in the production stack
     prod_tag_yaml = read_tag_yaml(
@@ -967,7 +968,7 @@ def test_dev_tag_with_production_override_stack(cli_test_env, capsys):
     )
     assert prod_tag_yaml["image"]["tag"] == "old-tag"
 
-    # Verify no PR was created
+    # Verify no PR was created (no mock calls should have been made)
     assert len(created_prs) == 0
 
 
