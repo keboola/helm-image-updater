@@ -485,12 +485,12 @@ def test_missing_required_env_var(cli_test_env, mock_git_operations, capsys):
     assert mock_git_operations['create_pull_request'].call_count == 0
 
 
-def test_invalid_tag_format(cli_test_env, capsys):
+def test_invalid_tag_format(cli_test_env, mock_git_operations, capsys):
     """Test error handling for invalid tag format.
 
     This test verifies that:
-    1. Invalid tag format is detected
-    2. The script exits with the correct error code
+    1. Invalid tag format is detected during validation
+    2. The script exits with code 1
     3. Appropriate error message is displayed
     4. No PRs are created
     """
@@ -500,25 +500,20 @@ def test_invalid_tag_format(cli_test_env, capsys):
     os.environ["HELM_CHART"] = "test-chart"
     os.environ["IMAGE_TAG"] = "invalid-format"  # Not starting with dev- or production-
 
-    # Track PRs
-    created_prs = []
-
-    def mock_create_branch_commit_and_pr(self, branch_name, files_to_commit, commit_message, pr_title, pr_body, base_branch="main", auto_merge=False):
-        created_prs.append({"branch": branch_name, "title": pr_title, "base": base_branch})
-
-    # Run CLI expecting an error
-    with (
-        pytest.raises(SystemExit) as e,
-        patch("helm_image_updater.io_layer.IOLayer.create_branch_commit_and_pr", mock_create_branch_commit_and_pr),
-    ):
+    # Run CLI expecting SystemExit due to validation failure
+    with pytest.raises(SystemExit) as exc_info:
         cli.main()
+
+    # Verify exit code is 1
+    assert exc_info.value.code == 1
 
     # Check error message
     captured = capsys.readouterr()
-    assert "Invalid image tag format" in captured.out
+    assert "Error: Invalid IMAGE_TAG format: 'invalid-format'" in captured.out
+    assert "Must start with 'dev-', 'production-', 'canary-' or be a valid semver" in captured.out
 
-    # Verify exit code
-    assert e.value.code == 1
+    # Verify no PRs were created
+    assert mock_git_operations['create_pull_request'].call_count == 0
 
     # Verify no files were changed
     dev_tag_yaml = read_tag_yaml(

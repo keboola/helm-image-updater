@@ -74,6 +74,8 @@ class EnvironmentConfig:
         Returns:
             List of error messages (empty if valid)
         """
+        from .tag_classification import detect_tag_type, TagType
+        
         errors = []
         
         # Required fields
@@ -86,11 +88,22 @@ class EnvironmentConfig:
         if not self.image_tag and not self.extra_tags:
             errors.append("Either IMAGE_TAG or at least one EXTRA_TAG must be set")
         
+        # Validate main image tag format if provided and not in override mode
+        if self.image_tag and not self.override_stack:
+            tag_type = detect_tag_type(self.image_tag)
+            if tag_type == TagType.INVALID:
+                errors.append(f"Invalid IMAGE_TAG format: '{self.image_tag}'. Must start with 'dev-', 'production-', 'canary-' or be a valid semver (e.g., 1.2.3)")
+        
         # Validate extra tag format
         for i, tag in enumerate(self.extra_tags, 1):
             if "path" not in tag or "value" not in tag:
                 errors.append(f"EXTRA_TAG{i} must be in format 'path:value'")
             elif not tag["value"]:
                 errors.append(f"EXTRA_TAG{i} value cannot be empty")
+            elif not self.override_stack:
+                # Validate the tag value format
+                tag_type = detect_tag_type(tag["value"])
+                if tag_type == TagType.INVALID:
+                    errors.append(f"Invalid EXTRA_TAG{i} format: '{tag['value']}'. Must start with 'dev-', 'production-', 'canary-' or be a valid semver (e.g., 1.2.3)")
         
         return errors
