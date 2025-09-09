@@ -47,8 +47,8 @@ def create_tag_yaml(path, tag):
         )
 
 
-def test_update_integration_with_new_architecture(test_stacks):
-    """Test that the new architecture can handle basic update scenarios."""
+def test_plan_with_dry_run(test_stacks):
+    """Test plan with dry run."""
     os.chdir(test_stacks["base_dir"])
     
     # Create a mock config
@@ -107,7 +107,7 @@ def test_tag_yaml_file_operations(test_stacks):
 
 
 def test_extra_tags_calculation(test_stacks):
-    """Test extra tags calculation with the new architecture."""
+    """Test extra tags calculation."""
     from helm_image_updater.plan_builder import calculate_tag_changes
     import yaml
     
