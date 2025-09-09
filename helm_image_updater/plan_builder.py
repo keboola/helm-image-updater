@@ -174,7 +174,7 @@ def _calculate_all_changes(plan: UpdatePlan, io_layer: IOLayer) -> List[Dict[str
             continue
         
         # Calculate changes
-        changes = _calculate_tag_changes(
+        changes = calculate_tag_changes(
             current_data=current_data,
             image_tag=plan.image_tag,
             extra_tags=plan.extra_tags,
@@ -209,7 +209,7 @@ def _calculate_all_changes(plan: UpdatePlan, io_layer: IOLayer) -> List[Dict[str
     
     return stack_changes
 
-def _calculate_tag_changes(
+def calculate_tag_changes(
     current_data: Dict[str, Any],
     image_tag: str,
     extra_tags: Optional[List[Dict[str, str]]] = None,

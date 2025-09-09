@@ -12,7 +12,6 @@ import pytest
 from helm_image_updater.io_layer import IOLayer
 from helm_image_updater.environment import EnvironmentConfig
 from helm_image_updater.plan_builder import prepare_plan
-from helm_image_updater.plan_executor import execute_plan
 from unittest.mock import Mock
 
 
