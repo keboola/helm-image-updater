@@ -280,7 +280,7 @@ def calculate_tag_changes(
     return changes
 
 
-def _apply_changes_to_data(data: Dict[str, Any], changes: List[Any]) -> Dict[str, Any]:
+def _apply_changes_to_data(data: Dict[str, Any], changes: List[TagChange]) -> Dict[str, Any]:
     """Apply changes to the data structure."""
     import copy
     new_data = copy.deepcopy(data)
