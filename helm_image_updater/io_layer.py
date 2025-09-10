@@ -119,6 +119,25 @@ class IOLayer:
         
         return True
     
+    def read_shared_values_yaml(self, stack: str) -> Optional[Dict[str, Any]]:
+        """Read and parse <stack>/shared-values.yaml.
+        
+        Args:
+            stack: Stack name to read shared values for
+            
+        Returns:
+            Dictionary with shared values contents or None if file doesn't exist
+        """
+        file_path = Path(stack) / "shared-values.yaml"
+        if not file_path.exists():
+            return None
+        
+        try:
+            with file_path.open() as f:
+                return yaml.safe_load(f)
+        except yaml.YAMLError:
+            return None
+    
     # -----------------------------------------------------------------------------
     # Git Operations
     # -----------------------------------------------------------------------------

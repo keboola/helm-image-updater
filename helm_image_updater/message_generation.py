@@ -59,7 +59,8 @@ def generate_pr_title_prefix(
     strategy: UpdateStrategy,
     is_multi_stage: bool,
     user_requested_automerge: bool,
-    target_stacks: List[str]
+    target_stacks: List[str],
+    cloud_provider: Optional[str] = None
 ) -> str:
     """
     Generate the PR title prefix based on the update context.
@@ -71,6 +72,7 @@ def generate_pr_title_prefix(
         is_multi_stage: Whether this is a multi-stage deployment
         user_requested_automerge: Original user automerge preference
         target_stacks: List of stacks being updated
+        cloud_provider: Cloud provider for multi-cloud deployment (aws, azure, gcp)
         
     Returns:
         PR title prefix string
@@ -87,16 +89,15 @@ def generate_pr_title_prefix(
     
     # Multi-stage mode has special prefixes
     if is_multi_stage:
+        # Build cloud suffix
+        cloud_suffix = f" {cloud_provider}" if cloud_provider else ""
+        
         if is_dev_update:
-            if user_requested_automerge:
-                return "[multi-stage] [test sync]"
-            else:
-                return "[multi-stage] [test sync manual]"
+            merge_suffix = "" if user_requested_automerge else " manual"
+            return f"[multi-stage] [test sync{cloud_suffix}{merge_suffix}]"
         else:
-            if user_requested_automerge:
-                return "[multi-stage] [prod sync]"
-            else:
-                return "[multi-stage] [prod sync manual]"
+            # Production PRs never auto-merge in multi-stage, so no "manual" needed for requested automerge
+            return f"[multi-stage] [prod sync{cloud_suffix}]"
     
     # Regular mode
     if is_dev_update:

@@ -15,7 +15,8 @@ from .message_generation import (
     generate_pr_title_prefix,
     format_pr_body_with_metadata,
 )
-from .config import CANARY_STACKS, IGNORED_FOLDERS
+from .config import CANARY_STACKS, IGNORED_FOLDERS, DEV_STACK_MAPPING
+from .cloud_detection import get_stack_cloud_provider
 
 
 def prepare_plan(config: EnvironmentConfig, io_layer: IOLayer) -> UpdatePlan:
@@ -74,7 +75,7 @@ def prepare_plan(config: EnvironmentConfig, io_layer: IOLayer) -> UpdatePlan:
         plan.file_changes.append(stack_change['file_change'])
     
     # Group changes into PRs
-    pr_groups = _group_changes_for_prs(stack_changes, plan, config)
+    pr_groups = _group_changes_for_prs(stack_changes, plan, config, io_layer)
     
     # Create PR plans
     for pr_group in pr_groups:
@@ -301,7 +302,8 @@ def _apply_changes_to_data(data: Dict[str, Any], changes: List[Any]) -> Dict[str
 def _group_changes_for_prs(
     stack_changes: List[Dict[str, Any]], 
     plan: UpdatePlan,
-    config: EnvironmentConfig
+    config: EnvironmentConfig,
+    io_layer: IOLayer
 ) -> List[Dict[str, Any]]:
     """Group changes into pull requests based on strategy."""
     
@@ -315,30 +317,42 @@ def _group_changes_for_prs(
         }]
     
     if plan.multi_stage and plan.strategy == UpdateStrategy.PRODUCTION:
-        # Multi-stage: separate dev and prod PRs
-        dev_changes = [sc for sc in stack_changes if classify_stack(sc['stack']).is_dev]
-        prod_changes = [sc for sc in stack_changes if classify_stack(sc['stack']).is_production]
+        # Multi-cloud multi-stage: group by (dev/prod) × (aws/azure/gcp)
+        # Creates up to 6 PRs (3 dev + 3 prod)
+        cloud_groups = {
+            "aws": {"dev": [], "prod": []}, 
+            "azure": {"dev": [], "prod": []}, 
+            "gcp": {"dev": [], "prod": []}
+        }
         
+        # Group changes by cloud and dev/prod
+        for sc in stack_changes:
+            stack = sc['stack']
+            cloud = get_stack_cloud_provider(stack, io_layer)
+            is_dev = stack in DEV_STACK_MAPPING.values()
+            
+            category = 'dev' if is_dev else 'prod'
+            cloud_groups[cloud][category].append(sc)
+        
+        # Create PR plans for each non-empty (cloud, category) combination
         groups = []
-        if dev_changes:
-            groups.append({
-                'stacks': [sc['stack'] for sc in dev_changes],
-                'changes': dev_changes,
-                'base_branch': 'main',
-                'pr_type': 'multi_stage_dev'
-            })
-        if prod_changes:
-            groups.append({
-                'stacks': [sc['stack'] for sc in prod_changes],
-                'changes': prod_changes,
-                'base_branch': 'main',
-                'pr_type': 'multi_stage_prod'
-            })
+        for cloud in ["aws", "azure", "gcp"]:
+            for category in ["dev", "prod"]:
+                changes = cloud_groups[cloud][category]
+                if changes:  # Only create PR if there are changes
+                    groups.append({
+                        'stacks': [sc['stack'] for sc in changes],
+                        'changes': changes,
+                        'base_branch': 'main',
+                        'pr_type': f'multi_stage_{category}',
+                        'cloud_provider': cloud
+                    })
+        
         return groups
     
     # Default: one PR per stack or all in one
     if len(stack_changes) == 1 or plan.strategy in (UpdateStrategy.DEV, UpdateStrategy.OVERRIDE):
-        # Single stack or dev: one PR
+        # Single stack or dev or override: one PR
         return [{
             'stacks': [sc['stack'] for sc in stack_changes],
             'changes': stack_changes,
@@ -391,7 +405,8 @@ def _create_pr_plan(pr_group: Dict[str, Any], plan: UpdatePlan, config: Environm
         strategy=plan.strategy,
         is_multi_stage=plan.multi_stage,
         user_requested_automerge=config.automerge,
-        target_stacks=pr_group['stacks']
+        target_stacks=pr_group['stacks'],
+        cloud_provider=pr_group.get('cloud_provider')
     )
     
     # Generate PR title
