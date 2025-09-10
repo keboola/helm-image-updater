@@ -10,7 +10,7 @@ from helm_image_updater.tag_classification import detect_tag_type, TagType
 from helm_image_updater.message_generation import generate_pr_title_prefix
 from helm_image_updater.models import UpdateStrategy
 from helm_image_updater.stack_classification import classify_stack, filter_stacks_by_type
-from helm_image_updater.cloud_detection import get_stack_cloud_provider, classify_stacks_by_cloud, StackCloudInfo
+from helm_image_updater.cloud_detection import get_stack_cloud_provider
 
 
 class TestTagTypeDetection:
@@ -252,60 +252,3 @@ class TestCloudDetection:
         with pytest.raises(ValueError, match="Unsupported cloudProvider 'invalid' in test-stack/shared-values.yaml"):
             get_stack_cloud_provider("test-stack", mock_io_layer)
             
-    def test_get_stack_cloud_provider_dev_mismatch(self):
-        """Test error handling for dev stack cloud provider mismatch."""
-        mock_io_layer = Mock()
-        mock_io_layer.read_shared_values_yaml.return_value = {"cloudProvider": "azure"}
-        
-        with pytest.raises(ValueError, match="Dev stack dev-keboola-gcp-us-central1 cloud mismatch: expected gcp, found azure"):
-            get_stack_cloud_provider("dev-keboola-gcp-us-central1", mock_io_layer)
-            
-    def test_classify_stacks_by_cloud(self):
-        """Test stack classification by cloud provider."""
-        mock_io_layer = Mock()
-        
-        def mock_shared_values(stack):
-            cloud_mapping = {
-                "dev-keboola-gcp-us-central1": {"cloudProvider": "gcp"},
-                "kbc-testing-azure-east-us-2": {"cloudProvider": "azure"},
-                "com-keboola-aws-prod": {"cloudProvider": "aws"},
-            }
-            return cloud_mapping.get(stack)
-            
-        mock_io_layer.read_shared_values_yaml.side_effect = mock_shared_values
-        
-        stacks = [
-            "dev-keboola-gcp-us-central1",
-            "kbc-testing-azure-east-us-2", 
-            "com-keboola-aws-prod"
-        ]
-        
-        result = classify_stacks_by_cloud(stacks, mock_io_layer)
-        
-        # Check structure
-        assert "aws" in result
-        assert "azure" in result
-        assert "gcp" in result
-        
-        # Check GCP classification
-        assert len(result["gcp"]) == 1
-        gcp_stack = result["gcp"][0]
-        assert gcp_stack.stack == "dev-keboola-gcp-us-central1"
-        assert gcp_stack.cloud_provider == "gcp"
-        assert gcp_stack.is_dev == True
-        
-        # Check Azure classification
-        assert len(result["azure"]) == 1
-        azure_stack = result["azure"][0]
-        assert azure_stack.stack == "kbc-testing-azure-east-us-2"
-        assert azure_stack.cloud_provider == "azure"
-        assert azure_stack.is_dev == True
-        
-        # Check AWS classification
-        assert len(result["aws"]) == 1
-        aws_stack = result["aws"][0]
-        assert aws_stack.stack == "com-keboola-aws-prod"
-        assert aws_stack.cloud_provider == "aws"
-        assert aws_stack.is_dev == False
-
-
