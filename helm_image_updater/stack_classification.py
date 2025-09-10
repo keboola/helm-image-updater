@@ -55,31 +55,21 @@ def classify_stack(stack_name: str) -> StackClassification:
     )
 
 
-def filter_stacks_by_type(all_stacks: List[str], stack_type: str) -> List[str]:
+def get_dev_stacks(all_stacks: List[str]) -> List[str]:
     """
-    Filter stacks based on the desired type.
+    Get development stacks, excluding ignored/excluded ones.
     
     Args:
         all_stacks: List of all stack names
-        stack_type: Type of stacks to filter ('dev', 'production', 'canary', 'all')
         
     Returns:
-        Filtered list of stack names
+        Filtered list of development stack names
     """
     result = []
     for stack in all_stacks:
         classification = classify_stack(stack)
-        
-        if classification.is_ignored or classification.is_excluded:
-            continue
             
-        if stack_type == "dev" and classification.is_dev:
-            result.append(stack)
-        elif stack_type == "production" and classification.is_production:
-            result.append(stack)
-        elif stack_type == "canary" and classification.is_canary:
-            result.append(stack)
-        elif stack_type == "all" and (classification.is_dev or classification.is_production):
+        if classification.is_dev:
             result.append(stack)
     
     return result

@@ -9,7 +9,7 @@ Functions:
 """
 
 from typing import Dict, Optional, Protocol
-from .config import DEV_STACK_MAPPING, SUPPORTED_CLOUD_PROVIDERS
+from .config import SUPPORTED_CLOUD_PROVIDERS
 
 
 class IOLayerProtocol(Protocol):

@@ -9,7 +9,7 @@ from unittest.mock import Mock
 from helm_image_updater.tag_classification import detect_tag_type, TagType
 from helm_image_updater.message_generation import generate_pr_title_prefix
 from helm_image_updater.models import UpdateStrategy
-from helm_image_updater.stack_classification import classify_stack, filter_stacks_by_type
+from helm_image_updater.stack_classification import classify_stack, get_dev_stacks
 from helm_image_updater.cloud_detection import get_stack_cloud_provider
 
 
@@ -95,37 +95,24 @@ class TestStackClassification:
 class TestStackFiltering:
     """Test stack filtering logic."""
     
-    def test_filter_dev_stacks(self):
-        """Test filtering for dev stacks."""
+    def test_get_dev_stacks(self):
+        """Test getting dev stacks."""
         all_stacks = [
             "dev-keboola-gcp-us-central1",  # GCP dev
             "kbc-testing-azure-east-us-2",  # Azure dev  
             "dev-keboola-aws-eu-west-1",    # AWS dev
-            "com-keboola-prod",
-            "dev-keboola-canary-orion",
-            "dev-keboola-gcp-us-east1-e2e",  # excluded
+            "com-keboola-prod",             # production
+            "dev-keboola-canary-orion",     # canary
+            "dev-keboola-gcp-us-east1-e2e", # excluded
         ]
         
-        result = filter_stacks_by_type(all_stacks, "dev")
+        result = get_dev_stacks(all_stacks)
         expected = [
             "dev-keboola-gcp-us-central1", 
             "kbc-testing-azure-east-us-2", 
             "dev-keboola-aws-eu-west-1"
         ]
         assert sorted(result) == sorted(expected)
-        
-    def test_filter_production_stacks(self):
-        """Test filtering for production stacks."""
-        all_stacks = [
-            "dev-keboola-gcp-us-central1",
-            "com-keboola-prod",
-            "cloud-keboola-prod",
-        ]
-        
-        result = filter_stacks_by_type(all_stacks, "production")
-        assert "com-keboola-prod" in result
-        assert "cloud-keboola-prod" in result
-        assert "dev-keboola-gcp-us-central1" not in result
 
 
 class TestPRTitleGeneration:

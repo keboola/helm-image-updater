@@ -8,7 +8,7 @@ from .models import UpdatePlan, FileChange, PRPlan, UpdateStrategy, TagChange
 from .environment import EnvironmentConfig
 from .io_layer import IOLayer
 from .tag_classification import detect_tag_type, TagType
-from .stack_classification import classify_stack, filter_stacks_by_type
+from .stack_classification import classify_stack, get_dev_stacks
 from .message_generation import (
     generate_commit_message,
     generate_pr_title,
@@ -132,7 +132,7 @@ def _select_target_stacks(
         return []
     
     if strategy == UpdateStrategy.DEV:
-        return filter_stacks_by_type(all_stacks, "dev")
+        return get_dev_stacks(all_stacks)
     
     if strategy == UpdateStrategy.PRODUCTION:
         # All non-canary stacks
