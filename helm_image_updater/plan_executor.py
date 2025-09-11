@@ -1,6 +1,5 @@
 """Plan executor - executes a prepared plan."""
 
-import time
 from typing import Dict, List
 from .models import UpdatePlan, ExecutionResult
 from .io_layer import IOLayer
@@ -69,13 +68,7 @@ def _group_files_by_pr(plan: UpdatePlan) -> Dict[str, Dict[str, any]]:
 
 def _execute_pr_plans(plan: UpdatePlan, io_layer: IOLayer, result: ExecutionResult):
     """Create all pull requests."""
-    print(f"📋 Creating {len(plan.pr_plans)} PRs with 2-second delays to prevent race conditions...")
-    
-    for i, pr_plan in enumerate(plan.pr_plans):
-        # Add delay between PRs to prevent GitHub API race conditions
-        if i > 0:
-            print(f"⏱️ Waiting 2 seconds before creating next PR to prevent race conditions...")
-            time.sleep(2)
+    for pr_plan in plan.pr_plans:
         if plan.dry_run:
             print(f"[DRY RUN] Would create PR: {pr_plan.pr_title}")
             print(f"  Branch: {pr_plan.branch_name}")
