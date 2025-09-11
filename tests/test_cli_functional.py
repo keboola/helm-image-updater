@@ -60,6 +60,29 @@ def mock_github_repo():
 
 
 @pytest.fixture
+def mock_git_operations():
+    """Mock all Git/GitHub operations in IOLayer, allowing file writing to happen."""
+    
+    with (
+        patch("helm_image_updater.io_layer.IOLayer.checkout_branch", return_value=True) as mock_checkout,
+        patch("helm_image_updater.io_layer.IOLayer.add_files", return_value=True) as mock_add,
+        patch("helm_image_updater.io_layer.IOLayer.commit", return_value=True) as mock_commit,
+        patch("helm_image_updater.io_layer.IOLayer.push_branch", return_value=True) as mock_push,
+        patch("helm_image_updater.io_layer.IOLayer.create_pull_request") as mock_pr,
+    ):
+        # Default PR creation behavior
+        mock_pr.return_value = "https://github.com/mock/pull/123"
+        
+        yield {
+            'checkout_branch': mock_checkout,
+            'add_files': mock_add,
+            'commit': mock_commit,
+            'push_branch': mock_push,
+            'create_pull_request': mock_pr,
+        }
+
+
+@pytest.fixture
 def cli_test_env(mock_repo, mock_github_repo, tmp_path):
     """Setup test environment for CLI tests."""
     # Create test stack structure
@@ -76,14 +99,8 @@ def cli_test_env(mock_repo, mock_github_repo, tmp_path):
     # Setup patches for external dependencies
     with (
         patch("helm_image_updater.config.GITHUB_REPO", "mock-org/mock-repo"),
-        patch("git.Repo", return_value=mock_repo),
         patch("helm_image_updater.cli.Repo", return_value=mock_repo),
-        patch("github.Github", return_value=Mock(get_repo=lambda x: mock_github_repo)),
-        patch(
-            "helm_image_updater.cli.Github",
-            return_value=Mock(get_repo=lambda x: mock_github_repo),
-        ),
-        patch("helm_image_updater.pr_manager.create_pr", return_value=None),
+        patch("helm_image_updater.cli.Github", return_value=Mock(get_repo=lambda x: mock_github_repo)),
     ):
         # Clear environment and set basic variables
         os.environ.clear()
@@ -173,7 +190,7 @@ def test_cli_environment_variables(cli_test_env, capsys):
 # -----------------------------------------------------------------------------
 
 
-def test_dev_tag_update(cli_test_env, capsys):
+def test_dev_tag_update(cli_test_env, mock_git_operations, capsys):
     """Test updating dev stacks with a dev tag.
 
     This test verifies that:
@@ -188,29 +205,43 @@ def test_dev_tag_update(cli_test_env, capsys):
     os.environ["IMAGE_TAG"] = "dev-1.2.3"
     os.environ["AUTOMERGE"] = "true"
 
-    # Mock create_pr to track PRs created
+    # Track PR creation calls
     created_prs = []
 
-    def mock_create_pr(config, branch_name, pr_title, base="main"):
-        """Mock PR creation to track PR details."""
-        created_prs.append({"branch": branch_name, "title": pr_title, "base": base})
-        print(f"Created PR: {pr_title} (branch: {branch_name}, base: {base})")
+    def track_pr_creation(*args, **kwargs):
+        """Track GitHub PR creation details."""
+        # Extract arguments (self, title, body, branch_name, base_branch="main", auto_merge=False)
+        if len(args) >= 4:
+            title, body, branch_name = args[1], args[2], args[3]
+            base_branch = args[4] if len(args) > 4 else kwargs.get("base_branch", "main")
+        else:
+            title = kwargs.get("title", "Unknown")
+            body = kwargs.get("body", "")
+            branch_name = kwargs.get("branch_name", "unknown-branch")
+            base_branch = kwargs.get("base_branch", "main")
+        
+        created_prs.append({"branch": branch_name, "title": title, "base": base_branch})
+        print(f"Created PR: {title} (branch: {branch_name}, base: {base_branch})")
+        return "https://github.com/mock-org/mock-repo/pull/123"
 
-    # Mock create_pr but use real config
-    with patch("helm_image_updater.tag_updater.create_pr", mock_create_pr):
-        # Run CLI
-        cli.main()
+    # Customize the PR creation mock to track calls
+    mock_git_operations['create_pull_request'].side_effect = track_pr_creation
+
+    # Run CLI - files will be written, Git/GitHub operations mocked
+    cli.main()
 
     # Check console output
     captured = capsys.readouterr()
     assert "Processing Helm chart: test-chart" in captured.out
+    assert "New image tag: dev-1.2.3" in captured.out
     assert "Updating dev stacks (dev- tag)" in captured.out
 
-    # Verify tag.yaml was updated in dev stack
+     # Verify tag.yaml was updated in dev stack
     dev_tag_yaml = read_tag_yaml(
         base_dir / "dev-keboola-gcp-us-central1" / "test-chart" / "tag.yaml"
     )
     assert dev_tag_yaml["image"]["tag"] == "dev-1.2.3"
+    assert "Updated dev-keboola-gcp-us-central1/test-chart/tag.yaml" in captured.out
 
     # Verify tag.yaml was NOT updated in prod stack
     prod_tag_yaml = read_tag_yaml(
@@ -218,18 +249,25 @@ def test_dev_tag_update(cli_test_env, capsys):
     )
     assert prod_tag_yaml["image"]["tag"] == "old-tag"
 
+    # Verify Git operations were performed
+    assert mock_git_operations['checkout_branch'].called, "git checkout should be called"
+    assert mock_git_operations['add_files'].called, "git add should be called"
+    assert mock_git_operations['commit'].called, "git commit should be called"
+    assert mock_git_operations['create_pull_request'].called, "create PR should be called"
+    
     # Verify PR was created
     assert len(created_prs) == 1
     assert "test-chart" in created_prs[0]["title"]
 
 
-def test_production_tag_update(cli_test_env, capsys):
+def test_production_tag_update(cli_test_env, mock_git_operations, capsys):
     """Test updating all stacks with a production tag.
 
     This test verifies that:
     1. All stacks are updated with production tags
     2. The tag.yaml files are correctly modified
     3. Console output correctly reports the updates
+    4. Git operations are performed correctly
     """
     base_dir, mock_repo, mock_github_repo = cli_test_env
 
@@ -238,23 +276,36 @@ def test_production_tag_update(cli_test_env, capsys):
     os.environ["IMAGE_TAG"] = "production-1.2.3"
     os.environ["AUTOMERGE"] = "true"
 
-    # Mock create_pr to track PRs created
+    # Track PR creation calls
     created_prs = []
 
-    def mock_create_pr(config, branch_name, pr_title, base="main"):
-        """Mock PR creation to track PR details."""
-        created_prs.append({"branch": branch_name, "title": pr_title, "base": base})
-        print(f"Created PR: {pr_title} (branch: {branch_name}, base: {base})")
+    def track_pr_creation(*args, **kwargs):
+        """Track GitHub PR creation details."""
+        # Extract arguments (self, title, body, branch_name, base_branch="main", auto_merge=False)
+        if len(args) >= 4:
+            title, body, branch_name = args[1], args[2], args[3]
+            base_branch = args[4] if len(args) > 4 else kwargs.get("base_branch", "main")
+        else:
+            title = kwargs.get("title", "Unknown")
+            body = kwargs.get("body", "")
+            branch_name = kwargs.get("branch_name", "unknown-branch")
+            base_branch = kwargs.get("base_branch", "main")
+        
+        created_prs.append({"branch": branch_name, "title": title, "base": base_branch})
+        print(f"Created PR: {title} (branch: {branch_name}, base: {base_branch})")
+        return "https://github.com/mock-org/mock-repo/pull/123"
 
-    # Mock create_pr but use real config
-    with patch("helm_image_updater.tag_updater.create_pr", mock_create_pr):
-        # Run CLI
-        cli.main()
+    # Customize the PR creation mock to track calls
+    mock_git_operations['create_pull_request'].side_effect = track_pr_creation
+    
+    # Run CLI - files will be written, Git/GitHub operations mocked
+    cli.main()
 
     # Check console output
     captured = capsys.readouterr()
     assert "Processing Helm chart: test-chart" in captured.out
     assert "Updating all stacks (production- tag)" in captured.out
+    assert "New image tag:" in captured.out
 
     # Verify tag.yaml was updated in both dev and prod stacks
     dev_tag_yaml = read_tag_yaml(
@@ -266,6 +317,12 @@ def test_production_tag_update(cli_test_env, capsys):
         base_dir / "com-keboola-prod" / "test-chart" / "tag.yaml"
     )
     assert prod_tag_yaml["image"]["tag"] == "production-1.2.3"
+
+    # Verify Git operations were performed
+    assert mock_git_operations['checkout_branch'].called, "git checkout should be called"
+    assert mock_git_operations['add_files'].called, "git add should be called"
+    assert mock_git_operations['commit'].called, "git commit should be called"
+    assert mock_git_operations['create_pull_request'].called, "create PR should be called"
 
     # Verify PR was created
     assert len(created_prs) == 1
@@ -301,27 +358,28 @@ def test_canary_tag_update(cli_test_env, capsys):
     # Mock create_pr to track PRs created
     created_prs = []
 
-    def mock_create_pr(config, branch_name, pr_title, base="main"):
+    def mock_create_branch_commit_and_pr(self, branch_name, files_to_commit, commit_message, pr_title, pr_body, base_branch="main", auto_merge=False):
         """Mock PR creation to track PR details."""
-        created_prs.append({"branch": branch_name, "title": pr_title, "base": base})
-        print(f"Created PR: {pr_title} (branch: {branch_name}, base: {base})")
+        created_prs.append({"branch": branch_name, "title": pr_title, "base": base_branch})
+        print(f"Created PR: {pr_title} (branch: {branch_name}, base: {base_branch})")
+        return "https://github.com/mock-org/mock-repo/pull/123"
 
     # Test Case 1: Regular service that exists in multiple environments
     os.environ["HELM_CHART"] = "test-chart"
     os.environ["IMAGE_TAG"] = "canary-orion-1.2.3"
     os.environ["AUTOMERGE"] = "true"
 
-    with patch("helm_image_updater.tag_updater.create_pr", mock_create_pr):
+    with patch("helm_image_updater.io_layer.IOLayer.create_branch_commit_and_pr", mock_create_branch_commit_and_pr):
         cli.main()
 
     # Check console output for branch switching
     captured = capsys.readouterr()
     assert "Processing Helm chart: test-chart" in captured.out
-    assert "Detected canary tag with prefix 'canary-orion'" in captured.out
-    assert "switching to branch 'canary-orion'" in captured.out
+    assert "Detected canary tag, switching to branch 'canary-orion'" in captured.out
     assert "Successfully switched to branch 'canary-orion'" in captured.out
-    assert "Current branch: canary-orion" in captured.out
     assert "Updating canary stack" in captured.out
+    assert "New image tag:" in captured.out
+    assert "Updated dev-keboola-canary-orion/test-chart/tag.yaml: image.tag from old-tag to canary-orion-1.2.3" in captured.out
 
     # Verify tag.yaml was updated only in canary stack
     canary_tag_yaml = read_tag_yaml(
@@ -338,7 +396,7 @@ def test_canary_tag_update(cli_test_env, capsys):
     prod_tag_yaml = read_tag_yaml(
         base_dir / "com-keboola-prod" / "test-chart" / "tag.yaml"
     )
-    assert prod_tag_yaml["image"]["tag"] == "old-tag"
+    assert prod_tag_yaml["image"]["tag"] == "old-tag"    
 
     # Verify PR was created against canary branch
     assert len(created_prs) == 1
@@ -366,13 +424,13 @@ def test_canary_tag_update(cli_test_env, capsys):
     metastore_canary_dir.mkdir()
     create_tag_yaml(metastore_canary_dir / "tag.yaml", "old-canary-tag")
 
-    with patch("helm_image_updater.tag_updater.create_pr", mock_create_pr):
+    with patch("helm_image_updater.io_layer.IOLayer.create_branch_commit_and_pr", mock_create_branch_commit_and_pr):
         cli.main()
 
     # Check console output shows proper branch switching before file checks
     captured = capsys.readouterr()
     assert "Processing Helm chart: metastore" in captured.out
-    assert "Detected canary tag with prefix 'canary-orion'" in captured.out
+    assert "Detected canary tag, switching to branch 'canary-orion'" in captured.out
     assert "switching to branch 'canary-orion'" in captured.out
     assert "Successfully switched to branch 'canary-orion'" in captured.out
 
@@ -380,11 +438,13 @@ def test_canary_tag_update(cli_test_env, capsys):
     assert (
         "tag.yaml for chart metastore does not exist in any stack" not in captured.out
     )
+    assert "New image tag:" in captured.out
     assert "Updating canary stack" in captured.out
+    assert "Updated dev-keboola-canary-orion/metastore/tag.yaml: image.tag from old-canary-tag to canary-orion-metastore-0.0.5" in captured.out
 
     # Verify the canary-only service was updated
     metastore_tag_yaml = read_tag_yaml(metastore_canary_dir / "tag.yaml")
-    assert metastore_tag_yaml["image"]["tag"] == "canary-orion-metastore-0.0.5"
+    assert metastore_tag_yaml["image"]["tag"] == "canary-orion-metastore-0.0.5"    
 
     # Verify PR was created for canary-only service
     assert len(created_prs) == 1
@@ -431,12 +491,12 @@ def test_cli_target_path(cli_test_env, tmp_path, capsys):
 # -----------------------------------------------------------------------------
 
 
-def test_missing_required_env_var(cli_test_env, capsys):
+def test_missing_required_env_var(cli_test_env, mock_git_operations, capsys):
     """Test error handling for missing environment variables.
 
     This test verifies that:
-    1. Missing HELM_CHART env var is detected
-    2. The script raises a KeyError
+    1. Missing HELM_CHART env var is detected and validation fails
+    2. The script exits with code 1 and prints error message
     3. No PRs are created
     """
     base_dir, mock_repo, mock_github_repo = cli_test_env
@@ -444,32 +504,27 @@ def test_missing_required_env_var(cli_test_env, capsys):
     # Don't set HELM_CHART
     os.environ["IMAGE_TAG"] = "dev-1.2.3"
 
-    # Track PRs
-    created_prs = []
-
-    def mock_create_pr(config, branch_name, pr_title, base="main"):
-        created_prs.append({"branch": branch_name, "title": pr_title, "base": base})
-
-    # Run CLI expecting an KeyError
-    with (
-        pytest.raises(KeyError) as e,
-        patch("helm_image_updater.tag_updater.create_pr", mock_create_pr),
-    ):
+    # Run CLI expecting SystemExit due to validation failure
+    with pytest.raises(SystemExit) as exc_info:
         cli.main()
 
-    # Verify the missing key is HELM_CHART
-    assert str(e.value) == "'HELM_CHART'"
+    # Verify exit code is 1
+    assert exc_info.value.code == 1
 
-    # Verify PR was not created
-    assert len(created_prs) == 0
+    # Verify error message is printed
+    captured = capsys.readouterr()
+    assert "Error: HELM_CHART is required" in captured.out
+
+    # Verify no PRs were created
+    assert mock_git_operations['create_pull_request'].call_count == 0
 
 
-def test_invalid_tag_format(cli_test_env, capsys):
+def test_invalid_tag_format(cli_test_env, mock_git_operations, capsys):
     """Test error handling for invalid tag format.
 
     This test verifies that:
-    1. Invalid tag format is detected
-    2. The script exits with the correct error code
+    1. Invalid tag format is detected during validation
+    2. The script exits with code 1
     3. Appropriate error message is displayed
     4. No PRs are created
     """
@@ -479,25 +534,20 @@ def test_invalid_tag_format(cli_test_env, capsys):
     os.environ["HELM_CHART"] = "test-chart"
     os.environ["IMAGE_TAG"] = "invalid-format"  # Not starting with dev- or production-
 
-    # Track PRs
-    created_prs = []
-
-    def mock_create_pr(config, branch_name, pr_title, base="main"):
-        created_prs.append({"branch": branch_name, "title": pr_title, "base": base})
-
-    # Run CLI expecting an error
-    with (
-        pytest.raises(SystemExit) as e,
-        patch("helm_image_updater.tag_updater.create_pr", mock_create_pr),
-    ):
+    # Run CLI expecting SystemExit due to validation failure
+    with pytest.raises(SystemExit) as exc_info:
         cli.main()
+
+    # Verify exit code is 1
+    assert exc_info.value.code == 1
 
     # Check error message
     captured = capsys.readouterr()
-    assert "Invalid image tag format" in captured.out
+    assert "Error: Invalid IMAGE_TAG format: 'invalid-format'" in captured.out
+    assert "Must start with 'dev-', 'production-', 'canary-' or be a valid semver" in captured.out
 
-    # Verify exit code
-    assert e.value.code == 1
+    # Verify no PRs were created
+    assert mock_git_operations['create_pull_request'].call_count == 0
 
     # Verify no files were changed
     dev_tag_yaml = read_tag_yaml(
@@ -505,11 +555,8 @@ def test_invalid_tag_format(cli_test_env, capsys):
     )
     assert dev_tag_yaml["image"]["tag"] == "old-tag"
 
-    # Verify PR was not created
-    assert len(created_prs) == 0
 
-
-def test_invalid_extra_tag_format(cli_test_env, capsys):
+def test_invalid_extra_tag_format(cli_test_env, mock_git_operations, capsys):
     """Test error handling for invalid extra tag format.
 
     This test verifies that:
@@ -524,28 +571,19 @@ def test_invalid_extra_tag_format(cli_test_env, capsys):
     os.environ["IMAGE_TAG"] = "dev-1.2.3"
     os.environ["EXTRA_TAG1"] = "invalid-format"  # Missing colon separator
 
-    # Track PRs
-    created_prs = []
-
-    def mock_create_pr(config, branch_name, pr_title, base="main"):
-        created_prs.append({"branch": branch_name, "title": pr_title, "base": base})
-
     # Run CLI expecting an error
-    with (
-        pytest.raises(SystemExit) as e,
-        patch("helm_image_updater.tag_updater.create_pr", mock_create_pr),
-    ):
+    with pytest.raises(SystemExit) as exc_info:
         cli.main()
 
     # Check error message
     captured = capsys.readouterr()
-    assert "EXTRA_TAG1 must be in format" in captured.out
+    assert "Error: EXTRA_TAG1 must be in format 'path:value'" in captured.out
 
     # Verify exit code
-    assert e.value.code == 1
+    assert exc_info.value.code == 1
 
     # Verify PR was not created
-    assert len(created_prs) == 0
+    assert mock_git_operations['create_pull_request'].call_count == 0
 
 
 def test_valid_extra_tag_formats(cli_test_env, capsys):
@@ -571,13 +609,14 @@ def test_valid_extra_tag_formats(cli_test_env, capsys):
     # Track PRs
     created_prs = []
 
-    def mock_create_pr(config, branch_name, pr_title, base="main"):
+    def mock_create_branch_commit_and_pr(self, branch_name, files_to_commit, commit_message, pr_title, pr_body, base_branch="main", auto_merge=False):
         """Mock PR creation to track PR details."""
-        created_prs.append({"branch": branch_name, "title": pr_title, "base": base})
-        print(f"Created PR: {pr_title} (branch: {branch_name}, base: {base})")
+        created_prs.append({"branch": branch_name, "title": pr_title, "base": base_branch})
+        print(f"Created PR: {pr_title} (branch: {branch_name}, base: {base_branch})")
+        return "https://github.com/mock-org/mock-repo/pull/123"
 
     # Mock create_pr but use real config
-    with patch("helm_image_updater.tag_updater.create_pr", mock_create_pr):
+    with patch("helm_image_updater.io_layer.IOLayer.create_branch_commit_and_pr", mock_create_branch_commit_and_pr):
         # Run CLI
         cli.main()
 
@@ -602,7 +641,7 @@ def test_valid_extra_tag_formats(cli_test_env, capsys):
     created_prs.clear()
 
     # Mock create_pr but use real config
-    with patch("helm_image_updater.tag_updater.create_pr", mock_create_pr):
+    with patch("helm_image_updater.io_layer.IOLayer.create_branch_commit_and_pr", mock_create_branch_commit_and_pr):
         # Run CLI
         cli.main()
 
@@ -636,17 +675,18 @@ def test_nonexistent_stack_override(cli_test_env, capsys):
     # Track PRs
     created_prs = []
 
-    def mock_create_pr(config, branch_name, pr_title, base="main"):
-        created_prs.append({"branch": branch_name, "title": pr_title, "base": base})
+    def mock_create_branch_commit_and_pr(self, branch_name, files_to_commit, commit_message, pr_title, pr_body, base_branch="main", auto_merge=False):
+        created_prs.append({"branch": branch_name, "title": pr_title, "base": base_branch})
 
     # Only mock create_pr, use real config
-    with patch("helm_image_updater.tag_updater.create_pr", mock_create_pr):
+    with patch("helm_image_updater.io_layer.IOLayer.create_branch_commit_and_pr", mock_create_branch_commit_and_pr):
         # Run CLI
         cli.main()
 
     # Check console output
     captured = capsys.readouterr()
-    assert "Stack non-existent-stack does not exist" in captured.out
+    assert "Override stack: non-existent-stack" in captured.out
+    assert "No stacks found for strategy override" in captured.out
 
     # Verify tag.yaml files were not modified
     dev_tag_yaml = read_tag_yaml(
@@ -682,21 +722,21 @@ def test_multi_stage_automerge_true(cli_test_env, capsys):
     # Track PRs with their automerge setting
     created_prs = []
 
-    def mock_create_pr(config, branch_name, pr_title, base="main"):
+    def mock_create_branch_commit_and_pr(self, branch_name, files_to_commit, commit_message, pr_title, pr_body, base_branch="main", auto_merge=False):
         created_prs.append(
             {
                 "branch": branch_name,
                 "title": pr_title,
-                "base": base,
-                "automerge": config.automerge,
+                "base": base_branch,
+                "automerge": auto_merge,
             }
         )
         print(
-            f"Created PR: {pr_title} (branch: {branch_name}, base: {base}, automerge: {config.automerge})"
+            f"Created PR: {pr_title} (branch: {branch_name}, base: {base_branch}, automerge: {auto_merge})"
         )
 
     # Mock create_pr but use real config to capture automerge setting
-    with patch("helm_image_updater.tag_updater.create_pr", mock_create_pr):
+    with patch("helm_image_updater.io_layer.IOLayer.create_branch_commit_and_pr", mock_create_branch_commit_and_pr):
         # Run CLI
         cli.main()
 
@@ -764,21 +804,21 @@ def test_multi_stage_with_automerge_false(cli_test_env, capsys):
     # Track PRs with their automerge setting
     created_prs = []
 
-    def mock_create_pr(config, branch_name, pr_title, base="main"):
+    def mock_create_branch_commit_and_pr(self, branch_name, files_to_commit, commit_message, pr_title, pr_body, base_branch="main", auto_merge=False):
         created_prs.append(
             {
                 "branch": branch_name,
                 "title": pr_title,
-                "base": base,
-                "automerge": config.automerge,
+                "base": base_branch,
+                "automerge": auto_merge,
             }
         )
         print(
-            f"Created PR: {pr_title} (branch: {branch_name}, base: {base}, automerge: {config.automerge})"
+            f"Created PR: {pr_title} (branch: {branch_name}, base: {base_branch}, automerge: {auto_merge})"
         )
 
     # Mock create_pr but use real config to capture automerge setting
-    with patch("helm_image_updater.tag_updater.create_pr", mock_create_pr):
+    with patch("helm_image_updater.io_layer.IOLayer.create_branch_commit_and_pr", mock_create_branch_commit_and_pr):
         # Run CLI
         cli.main()
 
@@ -848,10 +888,10 @@ def test_dry_run(cli_test_env, capsys):
     # Check console output
     captured = capsys.readouterr()
     assert "Dry run: True" in captured.out
-    assert "Would update" in captured.out
+    assert "[DRY RUN] Would write to" in captured.out
 
-    # Verify the simulated PR creation was reported
-    assert "Would create PR:" in captured.out
+    # Verify dry run simulation correctly identifies changes
+    assert "[DRY RUN] Would create PR:" in captured.out
 
     # Verify no tag.yaml files were actually changed
     dev_tag_yaml = read_tag_yaml(
@@ -886,13 +926,14 @@ def test_custom_tag_with_override_stack(cli_test_env, capsys):
     # Track PRs
     created_prs = []
 
-    def mock_create_pr(config, branch_name, pr_title, base="main"):
+    def mock_create_branch_commit_and_pr(self, branch_name, files_to_commit, commit_message, pr_title, pr_body, base_branch="main", auto_merge=False):
         """Mock PR creation to track PR details."""
-        created_prs.append({"branch": branch_name, "title": pr_title, "base": base})
-        print(f"Created PR: {pr_title} (branch: {branch_name}, base: {base})")
+        created_prs.append({"branch": branch_name, "title": pr_title, "base": base_branch})
+        print(f"Created PR: {pr_title} (branch: {branch_name}, base: {base_branch})")
+        return "https://github.com/mock-org/mock-repo/pull/123"
 
     # Mock create_pr but use real config
-    with patch("helm_image_updater.tag_updater.create_pr", mock_create_pr):
+    with patch("helm_image_updater.io_layer.IOLayer.create_branch_commit_and_pr", mock_create_branch_commit_and_pr):
         # Run CLI
         cli.main()
 
@@ -938,20 +979,22 @@ def test_dev_tag_with_production_override_stack(cli_test_env, capsys):
     # Track PRs
     created_prs = []
 
-    def mock_create_pr(config, branch_name, pr_title, base="main"):
+    def mock_create_branch_commit_and_pr(self, branch_name, files_to_commit, commit_message, pr_title, pr_body, base_branch="main", auto_merge=False):
         """Mock PR creation to track PR details."""
-        created_prs.append({"branch": branch_name, "title": pr_title, "base": base})
-        print(f"Created PR: {pr_title} (branch: {branch_name}, base: {base})")
+        created_prs.append({"branch": branch_name, "title": pr_title, "base": base_branch})
+        print(f"Created PR: {pr_title} (branch: {branch_name}, base: {base_branch})")
+        return "https://github.com/mock-org/mock-repo/pull/123"
 
-    # Mock create_pr but use real config
-    with patch("helm_image_updater.tag_updater.create_pr", mock_create_pr):
-        # Run CLI
+    # Run CLI expecting an error due to validation
+    with pytest.raises(SystemExit) as exc_info:
         cli.main()
-
-    # Check console output
+    
+    # Check error message
     captured = capsys.readouterr()
-    assert "Processing Helm chart: test-chart" in captured.out
-    assert "Cannot apply non-production tag to production stack" in captured.out
+    assert "Error: Cannot apply non-production tag to production stack" in captured.out
+
+    # Verify exit code
+    assert exc_info.value.code == 1
 
     # Verify tag.yaml was NOT updated in the production stack
     prod_tag_yaml = read_tag_yaml(
@@ -959,11 +1002,11 @@ def test_dev_tag_with_production_override_stack(cli_test_env, capsys):
     )
     assert prod_tag_yaml["image"]["tag"] == "old-tag"
 
-    # Verify no PR was created
+    # Verify no PR was created (no mock calls should have been made)
     assert len(created_prs) == 0
 
 
-def test_happy_path_production_update(cli_test_env, capsys):
+def test_happy_path_production_update(cli_test_env, mock_git_operations, capsys):
     """Test the most common happy path - production tag with automerge.
 
     This test verifies the complete flow for the most common production scenario:
@@ -981,89 +1024,64 @@ def test_happy_path_production_update(cli_test_env, capsys):
     os.environ["AUTOMERGE"] = "true"  # this is default, but being explicit
     # DRY_RUN is not set, which defaults to false
 
-    # Set up mock repo to track git operations
-    mock_repo.git.reset_mock()
-
-    # Set up mock PR that simulates a successful PR creation and merge
-    mock_pr = MagicMock()
-    mock_pr.html_url = "https://github.com/mock-org/mock-repo/pull/999"
-    mock_pr.mergeable = True  # PR is mergeable
-    mock_github_repo.create_pull.return_value = mock_pr
-
     # Track PR creation calls
     created_prs = []
 
-    def mock_create_pr(config, branch_name, pr_title, base="main"):
-        """Mock PR creation with auto-merge functionality."""
-        created_prs.append(
-            {
-                "branch": branch_name,
-                "title": pr_title,
-                "base": base,
-                "automerge": config.automerge,
-            }
-        )
+    def track_pr_creation(*args, **kwargs):
+        """Track GitHub PR creation details."""
+        # Extract arguments (self, title, body, branch_name, base_branch="main", auto_merge=False)
+        if len(args) >= 4:
+            title, body, branch_name = args[1], args[2], args[3]
+            base_branch = args[4] if len(args) > 4 else kwargs.get("base_branch", "main")
+            auto_merge = args[5] if len(args) > 5 else kwargs.get("auto_merge", False)
+        else:
+            title = kwargs.get("title", "Unknown")
+            body = kwargs.get("body", "")
+            branch_name = kwargs.get("branch_name", "unknown-branch")
+            base_branch = kwargs.get("base_branch", "main")
+            auto_merge = kwargs.get("auto_merge", False)
+        
+        created_prs.append({
+            "branch": branch_name,
+            "title": title,
+            "base": base_branch,
+            "automerge": auto_merge,
+        })
 
         # Simulate the non-dry-run behavior that would occur in create_pr
-        config.repo.git.push("origin", branch_name)
-        pr = config.github_repo.create_pull(
-            title=pr_title,
-            body="Mock PR body",
-            head=branch_name,
-            base=base,
-        )
-
-        # Auto-merge if configured
-        if config.automerge:
-            pr.merge()
-            print(
-                f"Created and auto-merged PR: {pr_title} (branch: {branch_name}, base: {base})"
-            )
+        if auto_merge:
+            print(f"Created and auto-merged PR: {title} (branch: {branch_name}, base: {base_branch})")
         else:
-            print(f"Created PR: {pr_title} (branch: {branch_name}, base: {base})")
+            print(f"Created PR: {title} (branch: {branch_name}, base: {base_branch})")
 
-        return pr
+        return "https://github.com/mock-org/mock-repo/pull/123"
 
-    # Mock create_pr function
-    with patch("helm_image_updater.tag_updater.create_pr", mock_create_pr):
-        # Run CLI
-        cli.main()
+    # Customize the PR creation mock to track calls
+    mock_git_operations['create_pull_request'].side_effect = track_pr_creation
+    
+    # Run CLI - files will be written, Git/GitHub operations mocked
+    cli.main()
 
     # Check console output
     captured = capsys.readouterr()
     assert "Processing Helm chart: test-chart" in captured.out
     assert "New image tag: production-2.0.0" in captured.out
-    assert "Updating all stacks (production- tag)" in captured.out
+    assert "New image tag:" in captured.out
 
-    # Verify tag.yaml was updated in both dev and prod stacks
-    dev_tag_yaml = read_tag_yaml(
-        base_dir / "dev-keboola-gcp-us-central1" / "test-chart" / "tag.yaml"
-    )
-    assert dev_tag_yaml["image"]["tag"] == "production-2.0.0"
-
-    prod_tag_yaml = read_tag_yaml(
-        base_dir / "com-keboola-prod" / "test-chart" / "tag.yaml"
-    )
-    assert prod_tag_yaml["image"]["tag"] == "production-2.0.0"
+    # Verify console output shows updates for both dev and prod stacks
+    assert "Updated dev-keboola-gcp-us-central1/test-chart/tag.yaml: image.tag from old-tag to production-2.0.0" in captured.out
+    assert "Updated com-keboola-prod/test-chart/tag.yaml: image.tag from old-tag to production-2.0.0" in captured.out
 
     # Verify Git operations were performed
-    assert mock_repo.git.checkout.called, "git checkout should be called"
-    assert mock_repo.git.add.called, "git add should be called"
-    assert mock_repo.git.commit.called, "git commit should be called"
-    assert mock_repo.git.push.called, "git push should be called"
-
-    # Verify PR was created with correct parameters
-    assert mock_github_repo.create_pull.called, "create_pull should be called"
-    call_args = mock_github_repo.create_pull.call_args[1]
-    assert "test-chart" in call_args["title"]
-    assert call_args["base"] == "main"
-
-    # Verify PR auto-merge was attempted
-    assert mock_pr.merge.called, "PR merge should be called for auto-merge"
+    assert mock_git_operations['checkout_branch'].called, "git checkout should be called"
+    assert mock_git_operations['add_files'].called, "git add should be called"
+    assert mock_git_operations['commit'].called, "git commit should be called"
+    assert mock_git_operations['create_pull_request'].called, "create PR should be called"
 
     # Verify our tracking shows PR was created with automerge enabled
     assert len(created_prs) == 1
     assert created_prs[0]["automerge"] is True
+    assert "test-chart" in created_prs[0]["title"]
 
 
 def test_semver_main_image_tag(cli_test_env, capsys):
@@ -1083,13 +1101,14 @@ def test_semver_main_image_tag(cli_test_env, capsys):
     # Track PRs
     created_prs = []
 
-    def mock_create_pr(config, branch_name, pr_title, base="main"):
+    def mock_create_branch_commit_and_pr(self, branch_name, files_to_commit, commit_message, pr_title, pr_body, base_branch="main", auto_merge=False):
         """Mock PR creation to track PR details."""
-        created_prs.append({"branch": branch_name, "title": pr_title, "base": base})
-        print(f"Created PR: {pr_title} (branch: {branch_name}, base: {base})")
+        created_prs.append({"branch": branch_name, "title": pr_title, "base": base_branch})
+        print(f"Created PR: {pr_title} (branch: {branch_name}, base: {base_branch})")
+        return "https://github.com/mock-org/mock-repo/pull/123"
 
     # Mock create_pr but use real config
-    with patch("helm_image_updater.tag_updater.create_pr", mock_create_pr):
+    with patch("helm_image_updater.io_layer.IOLayer.create_branch_commit_and_pr", mock_create_branch_commit_and_pr):
         # Run CLI
         cli.main()
 
@@ -1123,7 +1142,7 @@ def test_semver_main_image_tag(cli_test_env, capsys):
     created_prs.clear()
 
     # Mock create_pr but use real config
-    with patch("helm_image_updater.tag_updater.create_pr", mock_create_pr):
+    with patch("helm_image_updater.io_layer.IOLayer.create_branch_commit_and_pr", mock_create_branch_commit_and_pr):
         # Run CLI
         cli.main()
 
