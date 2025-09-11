@@ -364,7 +364,12 @@ class IOLayer:
         Returns:
             PR URL if created, None if dry run
         """
+        # Always start from the base branch before creating new branch
+        print(f"🔀 Switching to base branch: {base_branch}")
+        self.checkout_branch(base_branch, create=False)
+        
         # Create and checkout branch
+        print(f"🌿 Creating new branch: {branch_name} from {base_branch}")
         self.checkout_branch(branch_name, create=True)
         
         # Add and commit files (files should already exist on disk)
