@@ -37,7 +37,7 @@ CANARY_STACKS = {
         "base_branch": "canary-orion",
     },
 }
-IGNORED_FOLDERS = {".venv", "aws", ".git", ".github"}
+IGNORED_FOLDERS = {".venv", "aws", ".git", ".github", "utils", "docs", "apps"}
 GITHUB_REPO = os.getenv("GITHUB_REPOSITORY", "keboola/kbc-stacks")
 GITHUB_BRANCH = "main"
 
