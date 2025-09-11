@@ -338,10 +338,11 @@ def _group_changes_for_prs(
             print(f"  - {stack} → {cloud} {category}")
         
         # Create PR plans for each non-empty (cloud, category) combination
+        # Production PRs first, then dev PRs to prevent race condition
         groups = []
-        print("\n🎯 Creating PR groups:")
-        for cloud in ["aws", "azure", "gcp"]:
-            for category in ["dev", "prod"]:
+        print("\n🎯 Creating PR groups (prod first, then dev):")
+        for category in ["prod", "dev"]:
+            for cloud in ["aws", "azure", "gcp"]:
                 changes = cloud_groups[cloud][category]
                 if changes:  # Only create PR if there are changes
                     stacks = [sc['stack'] for sc in changes]
