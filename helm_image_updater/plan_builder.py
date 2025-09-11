@@ -317,6 +317,7 @@ def _group_changes_for_prs(
         }]
     
     if plan.multi_stage and plan.strategy == UpdateStrategy.PRODUCTION:
+        print("🔄 Multi-stage deployment detected - grouping by cloud and dev/prod")
         # Multi-cloud multi-stage: group by (dev/prod) × (aws/azure/gcp)
         # Creates up to 6 PRs (3 dev + 3 prod)
         cloud_groups = {
@@ -326,6 +327,7 @@ def _group_changes_for_prs(
         }
         
         # Group changes by cloud and dev/prod
+        print(f"📋 Analyzing {len(stack_changes)} stack changes:")
         for sc in stack_changes:
             stack = sc['stack']
             cloud = get_stack_cloud_provider(stack, io_layer)
@@ -333,21 +335,27 @@ def _group_changes_for_prs(
             
             category = 'dev' if is_dev else 'prod'
             cloud_groups[cloud][category].append(sc)
+            print(f"  - {stack} → {cloud} {category}")
         
         # Create PR plans for each non-empty (cloud, category) combination
         groups = []
+        print("\n🎯 Creating PR groups:")
         for cloud in ["aws", "azure", "gcp"]:
             for category in ["dev", "prod"]:
                 changes = cloud_groups[cloud][category]
                 if changes:  # Only create PR if there are changes
+                    stacks = [sc['stack'] for sc in changes]
+                    pr_type = f'multi_stage_{category}'
+                    print(f"  - {cloud} {category}: {len(changes)} changes in stacks {stacks} (pr_type: {pr_type})")
                     groups.append({
-                        'stacks': [sc['stack'] for sc in changes],
+                        'stacks': stacks,
                         'changes': changes,
                         'base_branch': 'main',
-                        'pr_type': f'multi_stage_{category}',
+                        'pr_type': pr_type,
                         'cloud_provider': cloud
                     })
         
+        print(f"📊 Total PR groups created: {len(groups)}")
         return groups
     
     # Default: one PR per stack or all in one
@@ -428,6 +436,12 @@ def _create_pr_plan(pr_group: Dict[str, Any], plan: UpdatePlan, config: Environm
     # Determine auto-merge
     auto_merge = _should_auto_merge(plan, pr_group['pr_type'], config.automerge)
     
+    print(f"🔀 Auto-merge decision for {pr_group['pr_type']}:")
+    print(f"   - pr_type: {pr_group['pr_type']}")
+    print(f"   - user_requested: {config.automerge}")
+    print(f"   - strategy: {plan.strategy}")
+    print(f"   - decision: {'AUTO-MERGE' if auto_merge else 'MANUAL ONLY'}")
+    
     # Get files to commit
     files_to_commit = [change['file_change'].file_path for change in pr_group['changes']]
     
@@ -454,10 +468,18 @@ def _get_canary_base_branch(image_tag: str) -> str:
 
 def _should_auto_merge(plan: UpdatePlan, pr_type: str, user_requested: bool) -> bool:
     """Determine if a PR should be auto-merged."""
+    print(f"    🧠 Auto-merge logic:")
+    print(f"       - strategy: {plan.strategy}")
+    print(f"       - pr_type: {pr_type}")
+    print(f"       - user_requested: {user_requested}")
+    
     if plan.strategy == UpdateStrategy.CANARY:
+        print(f"       - result: TRUE (canary always auto-merges)")
         return True  # Always auto-merge canary
     
     if pr_type == 'multi_stage_prod':
+        print(f"       - result: FALSE (multi-stage prod never auto-merges)")
         return False  # Never auto-merge multi-stage production
     
+    print(f"       - result: {user_requested} (using user preference)")
     return user_requested

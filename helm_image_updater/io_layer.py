@@ -259,6 +259,10 @@ class IOLayer:
         Returns:
             PR URL if created, None if dry run
         """
+        print(f"🚀 Creating PR: '{title}'")
+        print(f"   - Base: {base_branch}, Head: {branch_name}")
+        print(f"   - Auto-merge requested: {'YES' if auto_merge else 'NO'}")
+        
         if self.dry_run:
             merge_status = "and auto-merge" if auto_merge else "without auto-merge"
             print(f"[DRY RUN] Would create PR: '{title}' {merge_status}")
@@ -281,7 +285,10 @@ class IOLayer:
         
         # Auto-merge if requested
         if auto_merge:
+            print(f"🔄 Auto-merge requested - attempting to merge PR...")
             self._attempt_auto_merge(pr)
+        else:
+            print(f"⏸️ Auto-merge NOT requested - PR left for manual review")
         
         return pr.html_url
     
