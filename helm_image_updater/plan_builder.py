@@ -67,8 +67,9 @@ def prepare_plan(config: EnvironmentConfig, io_layer: IOLayer) -> UpdatePlan:
     stack_changes = _calculate_all_changes(plan, io_layer)
     
     if not stack_changes:
-        print("No changes needed.")
-        return plan
+        import sys
+        print(f"\nError: tag.yaml for chart {plan.helm_chart} does not exist in any stack or all tags are already up to date (noop change).")
+        sys.exit(1)
     
     # Create file changes
     for stack_change in stack_changes:
