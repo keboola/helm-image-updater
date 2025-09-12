@@ -99,7 +99,7 @@ class TestStackFiltering:
         """Test getting dev stacks."""
         all_stacks = [
             "dev-keboola-gcp-us-central1",  # GCP dev
-            "kbc-testing-azure-east-us-2",  # Azure dev  
+            "kbc-testing-azure-east-us-2",  # Azure dev
             "dev-keboola-aws-eu-west-1",    # AWS dev
             "com-keboola-prod",             # production
             "dev-keboola-canary-orion",     # canary
