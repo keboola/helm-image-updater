@@ -123,7 +123,7 @@ def setup_test_stacks(base_path):
     """Create test stack structure with tag.yaml and shared-values.yaml files."""
     # Create dev stacks (3 clouds)
     create_stack_with_shared_values(base_path / "dev-keboola-gcp-us-central1", "gcp")
-    create_stack_with_shared_values(base_path / "kbc-testing-azure-east-us-2", "azure") 
+    create_stack_with_shared_values(base_path / "kbc-testing-azure-east-us-2", "azure")
     create_stack_with_shared_values(base_path / "dev-keboola-aws-eu-west-1", "aws")
 
     # Create production stacks (3 clouds) 
