@@ -396,10 +396,27 @@ def _create_pr_plan(pr_group: Dict[str, Any], plan: UpdatePlan, config: Environm
     import random
     import string
     
-    # Generate branch name
+    # Generate shortened branch name
     suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
-    stack_part = '-'.join(pr_group['stacks'][:2]) if len(pr_group['stacks']) <= 2 else f"{pr_group['stacks'][0]}-and-{len(pr_group['stacks'])-1}-more"
-    branch_name = f"{plan.helm_chart}-{stack_part}-{plan.image_tag}-{suffix}"[:100]
+    
+    # Create descriptive but short branch name based on PR type
+    pr_type = pr_group['pr_type']
+    cloud_provider = pr_group.get('cloud_provider', '')
+    
+    if pr_type.startswith('multi_stage_'):
+        # Multi-stage: dummy-service-prod-sync-gcp-production-tag-abc1
+        stage = pr_type.replace('multi_stage_', '')  # 'dev' or 'prod'
+        cloud_suffix = f"-{cloud_provider}" if cloud_provider else ""
+        branch_name = f"{plan.helm_chart}-{stage}-sync{cloud_suffix}-{plan.image_tag}-{suffix}"
+    elif pr_type == 'canary':
+        # Canary: dummy-service-canary-canary-tag-abc1
+        branch_name = f"{plan.helm_chart}-canary-{plan.image_tag}-{suffix}"
+    else:
+        # Standard: dummy-service-production-tag-abc1
+        branch_name = f"{plan.helm_chart}-{plan.image_tag}-{suffix}"
+    
+    # Ensure it's not too long
+    branch_name = branch_name[:100]
     
     # Generate commit message
     commit_message = generate_commit_message(
