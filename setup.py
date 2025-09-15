@@ -34,7 +34,8 @@ else:
 
 setup(
     name="helm_image_updater",
-    version="0.2.0",
+    use_scm_version=True,
+    setup_requires=["setuptools_scm"],
     packages=find_packages(),
     install_requires=requirements,
     entry_points={
