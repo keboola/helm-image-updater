@@ -353,3 +353,7 @@ To see detailed test execution logs:
     │   └── test_tag_updater.py     # Tests for tag update logic
     ├── requirements.txt
     └── setup.py
+
+
+### e2e tests
+You can test a branch from this repo via running e2e tests in https://github.com/keboola/helm-image-updater-testing/actions/workflows/test-suite.yaml - just trigger the "Test suite" workflow and provide name of branch from this repo.
