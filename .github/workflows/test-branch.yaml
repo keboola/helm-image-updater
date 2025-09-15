@@ -1,69 +1,33 @@
-name: Build and Publish
+name: "helm-image-updater-testing e2e tests"
+run-name: "Testing branch: ${{ github.ref_name }}"
 
 on:
-  workflow_dispatch:
   push:
-    tags:
-      - "v*"
-    branches:
-      - "**"
-
-permissions:
-  contents: write
-  packages: write
-
-env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+    branches: ['**']  # Test all branches
+    paths:
+      - 'helm_image_updater/**'
+      - 'tests/**'
+      - 'pyproject.toml'
+      - 'requirements.txt'
+      - 'action.yaml'
 
 jobs:
-  test:
-    name: Run tests
+  test-branch:
+    name: "Run Test Suite for ${{ github.ref_name }}"
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      checks: write
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4.2.2
-
-      - name: Set up Python
-        uses: actions/setup-python@v5.3.0
-        with:
-          python-version: '3.13'
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-
-      - name: Run tests
-        run: pytest tests -sv --doctest-modules --junitxml=junit/test-results.xml
-
-      - name: Upload pytest results
-        uses: actions/upload-artifact@v4.5.0
-        with:
-          name: pytest-results
-          path: junit/test-results.xml
-        if: ${{ always() }}
-
-      - name: Publish Test Results
-        uses: EnricoMi/publish-unit-test-result-action@v2.18.0
-        if: always()
-        with:
-          comment_mode: off
-          files: junit/test-results.xml
+      - uses: actions/checkout@v4.2.1
 
       - name: Generate GitHub App token
         id: app-token
         uses: actions/create-github-app-token@v1.11.0
         with:
-          app-id: "1032801"  #  Keboola - kbc-stacks trigger app
-          private-key: ${{ secrets.GITOPS_KBC_STACKS_TRIGGER_APP_PVK }}
+          app-id: "1032649"  # Same app used in the main helm-image-updater
+          private-key: ${{ secrets.GITOPS_KBC_STACKS_ACTIONS_APP_PVK }}
           owner: keboola
           repositories: "helm-image-updater-testing"
 
-      - name: e2e tests via helm-image-updater-testing
+      - name: Trigger and wait for test suite
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           BRANCH_NAME: ${{ github.ref_name }}
@@ -146,30 +110,3 @@ jobs:
           echo "❌ **TIMEOUT** - Tests did not complete within the maximum wait time"
           echo "🔗 Check status manually: https://github.com/keboola/helm-image-updater-testing/actions/runs/$WORKFLOW_RUN_ID"
           exit 1
-
-  build-and-publish-package:
-    needs: test
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4.2.2
-        with:
-          fetch-depth: 0
-      - name: Set up Python
-        uses: actions/setup-python@v3
-        with:
-          python-version: "3.x"
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install build setuptools_scm
-      - name: Build package
-        run: python -m build
-      - name: Create Release
-        uses: ncipollo/release-action@v1
-        with:
-          artifacts: "./dist/helm_image_updater-*.tar.gz"
-          allowUpdates: true
-          replacesArtifacts: true
-          generateReleaseNotes: true
