@@ -8,14 +8,15 @@ from .models import UpdatePlan, FileChange, PRPlan, UpdateStrategy, TagChange
 from .environment import EnvironmentConfig
 from .io_layer import IOLayer
 from .tag_classification import detect_tag_type, TagType
-from .stack_classification import classify_stack, filter_stacks_by_type
+from .stack_classification import classify_stack, get_dev_stacks
 from .message_generation import (
     generate_commit_message,
     generate_pr_title,
     generate_pr_title_prefix,
     format_pr_body_with_metadata,
 )
-from .config import CANARY_STACKS, IGNORED_FOLDERS
+from .config import CANARY_STACKS, IGNORED_FOLDERS, DEV_STACK_MAPPING
+from .cloud_detection import get_stack_cloud_provider
 
 
 def prepare_plan(config: EnvironmentConfig, io_layer: IOLayer) -> UpdatePlan:
@@ -66,15 +67,16 @@ def prepare_plan(config: EnvironmentConfig, io_layer: IOLayer) -> UpdatePlan:
     stack_changes = _calculate_all_changes(plan, io_layer)
     
     if not stack_changes:
-        print("No changes needed.")
-        return plan
+        raise RuntimeError(
+            f"\nError: tag.yaml for chart {plan.helm_chart} does not exist in any stack or all tags are already up to date (noop change)."
+        )
     
     # Create file changes
     for stack_change in stack_changes:
         plan.file_changes.append(stack_change['file_change'])
     
     # Group changes into PRs
-    pr_groups = _group_changes_for_prs(stack_changes, plan, config)
+    pr_groups = _group_changes_for_prs(stack_changes, plan, config, io_layer)
     
     # Create PR plans
     for pr_group in pr_groups:
@@ -131,7 +133,7 @@ def _select_target_stacks(
         return []
     
     if strategy == UpdateStrategy.DEV:
-        return filter_stacks_by_type(all_stacks, "dev")
+        return get_dev_stacks(all_stacks)
     
     if strategy == UpdateStrategy.PRODUCTION:
         # All non-canary stacks
@@ -301,7 +303,8 @@ def _apply_changes_to_data(data: Dict[str, Any], changes: List[TagChange]) -> Di
 def _group_changes_for_prs(
     stack_changes: List[Dict[str, Any]], 
     plan: UpdatePlan,
-    config: EnvironmentConfig
+    config: EnvironmentConfig,
+    io_layer: IOLayer
 ) -> List[Dict[str, Any]]:
     """Group changes into pull requests based on strategy."""
     
@@ -315,30 +318,51 @@ def _group_changes_for_prs(
         }]
     
     if plan.multi_stage and plan.strategy == UpdateStrategy.PRODUCTION:
-        # Multi-stage: separate dev and prod PRs
-        dev_changes = [sc for sc in stack_changes if classify_stack(sc['stack']).is_dev]
-        prod_changes = [sc for sc in stack_changes if classify_stack(sc['stack']).is_production]
+        print("🔄 Multi-stage deployment detected - grouping by cloud and dev/prod")
+        # Multi-cloud multi-stage: group by (dev/prod) × (aws/azure/gcp)
+        # Creates up to 6 PRs (3 dev + 3 prod)
+        cloud_groups = {
+            "aws": {"dev": [], "prod": []}, 
+            "azure": {"dev": [], "prod": []}, 
+            "gcp": {"dev": [], "prod": []}
+        }
         
+        # Group changes by cloud and dev/prod
+        print(f"📋 Analyzing {len(stack_changes)} stack changes:")
+        for sc in stack_changes:
+            stack = sc['stack']
+            cloud = get_stack_cloud_provider(stack, io_layer)
+            is_dev = stack in DEV_STACK_MAPPING.values()
+            
+            category = 'dev' if is_dev else 'prod'
+            cloud_groups[cloud][category].append(sc)
+            print(f"  - {stack} → {cloud} {category}")
+        
+        # Create PR plans for each non-empty (cloud, category) combination
+        # Production PRs first, then dev PRs to prevent race condition
         groups = []
-        if dev_changes:
-            groups.append({
-                'stacks': [sc['stack'] for sc in dev_changes],
-                'changes': dev_changes,
-                'base_branch': 'main',
-                'pr_type': 'multi_stage_dev'
-            })
-        if prod_changes:
-            groups.append({
-                'stacks': [sc['stack'] for sc in prod_changes],
-                'changes': prod_changes,
-                'base_branch': 'main',
-                'pr_type': 'multi_stage_prod'
-            })
+        print("\n🎯 Creating PR groups (prod first, then dev):")
+        for category in ["prod", "dev"]:
+            for cloud in ["aws", "azure", "gcp"]:
+                changes = cloud_groups[cloud][category]
+                if changes:  # Only create PR if there are changes
+                    stacks = [sc['stack'] for sc in changes]
+                    pr_type = f'multi_stage_{category}'
+                    print(f"  - {cloud} {category}: {len(changes)} changes in stacks {stacks} (pr_type: {pr_type})")
+                    groups.append({
+                        'stacks': stacks,
+                        'changes': changes,
+                        'base_branch': 'main',
+                        'pr_type': pr_type,
+                        'cloud_provider': cloud
+                    })
+        
+        print(f"📊 Total PR groups created: {len(groups)}")
         return groups
     
     # Default: one PR per stack or all in one
     if len(stack_changes) == 1 or plan.strategy in (UpdateStrategy.DEV, UpdateStrategy.OVERRIDE):
-        # Single stack or dev: one PR
+        # Single stack or dev or override: one PR
         return [{
             'stacks': [sc['stack'] for sc in stack_changes],
             'changes': stack_changes,
@@ -373,10 +397,27 @@ def _create_pr_plan(pr_group: Dict[str, Any], plan: UpdatePlan, config: Environm
     import random
     import string
     
-    # Generate branch name
+    # Generate shortened branch name
     suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
-    stack_part = '-'.join(pr_group['stacks'][:2]) if len(pr_group['stacks']) <= 2 else f"{pr_group['stacks'][0]}-and-{len(pr_group['stacks'])-1}-more"
-    branch_name = f"{plan.helm_chart}-{stack_part}-{plan.image_tag}-{suffix}"[:100]
+    
+    # Create descriptive but short branch name based on PR type
+    pr_type = pr_group['pr_type']
+    cloud_provider = pr_group.get('cloud_provider', '')
+    
+    if pr_type.startswith('multi_stage_'):
+        # Multi-stage: dummy-service-prod-sync-gcp-production-tag-abc1
+        stage = pr_type.replace('multi_stage_', '')  # 'dev' or 'prod'
+        cloud_suffix = f"-{cloud_provider}" if cloud_provider else ""
+        branch_name = f"{plan.helm_chart}-{stage}-sync{cloud_suffix}-{plan.image_tag}-{suffix}"
+    elif pr_type == 'canary':
+        # Canary: dummy-service-canary-canary-tag-abc1
+        branch_name = f"{plan.helm_chart}-canary-{plan.image_tag}-{suffix}"
+    else:
+        # Standard: dummy-service-production-tag-abc1
+        branch_name = f"{plan.helm_chart}-{plan.image_tag}-{suffix}"
+    
+    # Ensure it's not too long
+    branch_name = branch_name[:100]
     
     # Generate commit message
     commit_message = generate_commit_message(
@@ -391,7 +432,8 @@ def _create_pr_plan(pr_group: Dict[str, Any], plan: UpdatePlan, config: Environm
         strategy=plan.strategy,
         is_multi_stage=plan.multi_stage,
         user_requested_automerge=config.automerge,
-        target_stacks=pr_group['stacks']
+        target_stacks=pr_group['stacks'],
+        cloud_provider=pr_group.get('cloud_provider')
     )
     
     # Generate PR title
@@ -412,6 +454,12 @@ def _create_pr_plan(pr_group: Dict[str, Any], plan: UpdatePlan, config: Environm
     
     # Determine auto-merge
     auto_merge = _should_auto_merge(plan, pr_group['pr_type'], config.automerge)
+    
+    print(f"🔀 Auto-merge decision for {pr_group['pr_type']}:")
+    print(f"   - pr_type: {pr_group['pr_type']}")
+    print(f"   - user_requested: {config.automerge}")
+    print(f"   - strategy: {plan.strategy}")
+    print(f"   - decision: {'AUTO-MERGE' if auto_merge else 'MANUAL ONLY'}")
     
     # Get files to commit
     files_to_commit = [change['file_change'].file_path for change in pr_group['changes']]
@@ -439,10 +487,18 @@ def _get_canary_base_branch(image_tag: str) -> str:
 
 def _should_auto_merge(plan: UpdatePlan, pr_type: str, user_requested: bool) -> bool:
     """Determine if a PR should be auto-merged."""
+    print(f"    🧠 Auto-merge logic:")
+    print(f"       - strategy: {plan.strategy}")
+    print(f"       - pr_type: {pr_type}")
+    print(f"       - user_requested: {user_requested}")
+    
     if plan.strategy == UpdateStrategy.CANARY:
+        print(f"       - result: TRUE (canary always auto-merges)")
         return True  # Always auto-merge canary
     
     if pr_type == 'multi_stage_prod':
+        print(f"       - result: FALSE (multi-stage prod never auto-merges)")
         return False  # Never auto-merge multi-stage production
     
+    print(f"       - result: {user_requested} (using user preference)")
     return user_requested

@@ -5,10 +5,12 @@ without any mocks or complex setup. Each test is fast and deterministic.
 """
 
 import pytest
+from unittest.mock import Mock
 from helm_image_updater.tag_classification import detect_tag_type, TagType
 from helm_image_updater.message_generation import generate_pr_title_prefix
 from helm_image_updater.models import UpdateStrategy
-from helm_image_updater.stack_classification import classify_stack, filter_stacks_by_type
+from helm_image_updater.stack_classification import classify_stack, get_dev_stacks
+from helm_image_updater.cloud_detection import get_stack_cloud_provider
 
 
 class TestTagTypeDetection:
@@ -47,9 +49,23 @@ class TestTagTypeDetection:
 class TestStackClassification:
     """Test stack classification logic."""
     
-    def test_dev_stack(self):
-        """Test classification of dev stacks."""
+    def test_dev_stack_gcp(self):
+        """Test classification of GCP dev stack."""
         result = classify_stack("dev-keboola-gcp-us-central1")
+        assert result.is_dev
+        assert not result.is_production
+        assert not result.is_canary
+        
+    def test_dev_stack_azure(self):
+        """Test classification of Azure dev stack."""
+        result = classify_stack("kbc-testing-azure-east-us-2")
+        assert result.is_dev
+        assert not result.is_production
+        assert not result.is_canary
+        
+    def test_dev_stack_aws(self):
+        """Test classification of AWS dev stack."""
+        result = classify_stack("dev-keboola-aws-eu-west-1")
         assert result.is_dev
         assert not result.is_production
         assert not result.is_canary
@@ -79,30 +95,24 @@ class TestStackClassification:
 class TestStackFiltering:
     """Test stack filtering logic."""
     
-    def test_filter_dev_stacks(self):
-        """Test filtering for dev stacks."""
+    def test_get_dev_stacks(self):
+        """Test getting dev stacks."""
         all_stacks = [
-            "dev-keboola-gcp-us-central1",
-            "com-keboola-prod",
-            "dev-keboola-canary-orion",
-            "dev-keboola-gcp-us-east1-e2e",  # excluded
+            "dev-keboola-gcp-us-central1",  # GCP dev
+            "kbc-testing-azure-east-us-2",  # Azure dev
+            "dev-keboola-aws-eu-west-1",    # AWS dev
+            "com-keboola-prod",             # production
+            "dev-keboola-canary-orion",     # canary
+            "dev-keboola-gcp-us-east1-e2e", # excluded
         ]
         
-        result = filter_stacks_by_type(all_stacks, "dev")
-        assert result == ["dev-keboola-gcp-us-central1"]
-        
-    def test_filter_production_stacks(self):
-        """Test filtering for production stacks."""
-        all_stacks = [
-            "dev-keboola-gcp-us-central1",
-            "com-keboola-prod",
-            "cloud-keboola-prod",
+        result = get_dev_stacks(all_stacks)
+        expected = [
+            "dev-keboola-gcp-us-central1", 
+            "kbc-testing-azure-east-us-2", 
+            "dev-keboola-aws-eu-west-1"
         ]
-        
-        result = filter_stacks_by_type(all_stacks, "production")
-        assert "com-keboola-prod" in result
-        assert "cloud-keboola-prod" in result
-        assert "dev-keboola-gcp-us-central1" not in result
+        assert sorted(result) == sorted(expected)
 
 
 class TestPRTitleGeneration:
@@ -147,7 +157,85 @@ class TestPRTitleGeneration:
             target_stacks=["dev-keboola-gcp-us-central1"]
         )
         assert prefix == "[multi-stage] [test sync manual]"
+        
+    def test_multi_cloud_dev_pr_title_with_cloud_provider(self):
+        """Test multi-cloud dev PR title generation with cloud provider."""
+        # With automerge and cloud provider
+        prefix = generate_pr_title_prefix(
+            strategy=UpdateStrategy.DEV,
+            is_multi_stage=True,
+            user_requested_automerge=True,
+            target_stacks=["dev-keboola-gcp-us-central1"],
+            cloud_provider="gcp"
+        )
+        assert prefix == "[multi-stage] [test sync gcp]"
+        
+        # Without automerge and cloud provider
+        prefix = generate_pr_title_prefix(
+            strategy=UpdateStrategy.DEV,
+            is_multi_stage=True,
+            user_requested_automerge=False,
+            target_stacks=["kbc-testing-azure-east-us-2"],
+            cloud_provider="azure"
+        )
+        assert prefix == "[multi-stage] [test sync azure manual]"
+        
+    def test_multi_cloud_prod_pr_title_with_cloud_provider(self):
+        """Test multi-cloud production PR title generation with cloud provider."""
+        prefix = generate_pr_title_prefix(
+            strategy=UpdateStrategy.PRODUCTION,
+            is_multi_stage=True,
+            user_requested_automerge=True,
+            target_stacks=["com-keboola-aws-prod"],
+            cloud_provider="aws"
+        )
+        assert prefix == "[multi-stage] [prod sync aws]"
 
 
-
-
+class TestCloudDetection:
+    """Test cloud provider detection logic."""
+    
+    def test_get_stack_cloud_provider_dev_stack(self):
+        """Test cloud provider detection for dev stacks."""
+        # Mock IO layer
+        mock_io_layer = Mock()
+        mock_io_layer.read_shared_values_yaml.return_value = {"cloudProvider": "gcp"}
+        
+        result = get_stack_cloud_provider("dev-keboola-gcp-us-central1", mock_io_layer)
+        assert result == "gcp"
+        
+        mock_io_layer.read_shared_values_yaml.assert_called_once_with("dev-keboola-gcp-us-central1")
+        
+    def test_get_stack_cloud_provider_prod_stack(self):
+        """Test cloud provider detection for production stacks."""
+        # Mock IO layer  
+        mock_io_layer = Mock()
+        mock_io_layer.read_shared_values_yaml.return_value = {"cloudProvider": "azure"}
+        
+        result = get_stack_cloud_provider("com-keboola-azure-prod", mock_io_layer)
+        assert result == "azure"
+        
+    def test_get_stack_cloud_provider_missing_yaml(self):
+        """Test error handling for missing shared-values.yaml."""
+        mock_io_layer = Mock()
+        mock_io_layer.read_shared_values_yaml.return_value = None
+        
+        with pytest.raises(ValueError, match="Missing cloudProvider in test-stack/shared-values.yaml"):
+            get_stack_cloud_provider("test-stack", mock_io_layer)
+            
+    def test_get_stack_cloud_provider_missing_field(self):
+        """Test error handling for missing cloudProvider field."""
+        mock_io_layer = Mock()
+        mock_io_layer.read_shared_values_yaml.return_value = {"someOtherField": "value"}
+        
+        with pytest.raises(ValueError, match="Missing cloudProvider in test-stack/shared-values.yaml"):
+            get_stack_cloud_provider("test-stack", mock_io_layer)
+            
+    def test_get_stack_cloud_provider_invalid_provider(self):
+        """Test error handling for invalid cloud provider."""
+        mock_io_layer = Mock()
+        mock_io_layer.read_shared_values_yaml.return_value = {"cloudProvider": "invalid"}
+        
+        with pytest.raises(ValueError, match="Unsupported cloudProvider 'invalid' in test-stack/shared-values.yaml"):
+            get_stack_cloud_provider("test-stack", mock_io_layer)
+            

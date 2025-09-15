@@ -8,7 +8,7 @@ This module contains no side effects - only stack analysis logic.
 from dataclasses import dataclass
 from typing import List
 
-from .config import DEV_STACKS, CANARY_STACKS, IGNORED_FOLDERS, EXCLUDED_STACKS
+from .config import DEV_STACK_MAPPING, CANARY_STACKS, IGNORED_FOLDERS, EXCLUDED_STACKS
 
 
 @dataclass
@@ -37,13 +37,16 @@ def classify_stack(stack_name: str) -> StackClassification:
     # Get list of canary stack names
     canary_stack_names = [info["stack"] for info in CANARY_STACKS.values()]
     
+    # Get list of dev stack names from mapping
+    dev_stack_names = list(DEV_STACK_MAPPING.values())
+    
     return StackClassification(
         name=stack_name,
-        is_dev=stack_name in DEV_STACKS,
+        is_dev=stack_name in dev_stack_names,
         is_production=(
             stack_name not in IGNORED_FOLDERS
             and stack_name not in EXCLUDED_STACKS
-            and stack_name not in DEV_STACKS
+            and stack_name not in dev_stack_names
             and stack_name not in canary_stack_names
         ),
         is_canary=stack_name in canary_stack_names,
@@ -52,31 +55,21 @@ def classify_stack(stack_name: str) -> StackClassification:
     )
 
 
-def filter_stacks_by_type(all_stacks: List[str], stack_type: str) -> List[str]:
+def get_dev_stacks(all_stacks: List[str]) -> List[str]:
     """
-    Filter stacks based on the desired type.
+    Get development stacks, excluding ignored/excluded ones.
     
     Args:
         all_stacks: List of all stack names
-        stack_type: Type of stacks to filter ('dev', 'production', 'canary', 'all')
         
     Returns:
-        Filtered list of stack names
+        Filtered list of development stack names
     """
     result = []
     for stack in all_stacks:
         classification = classify_stack(stack)
-        
-        if classification.is_ignored or classification.is_excluded:
-            continue
             
-        if stack_type == "dev" and classification.is_dev:
-            result.append(stack)
-        elif stack_type == "production" and classification.is_production:
-            result.append(stack)
-        elif stack_type == "canary" and classification.is_canary:
-            result.append(stack)
-        elif stack_type == "all" and (classification.is_dev or classification.is_production):
+        if classification.is_dev:
             result.append(stack)
     
     return result

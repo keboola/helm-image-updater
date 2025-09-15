@@ -119,6 +119,25 @@ class IOLayer:
         
         return True
     
+    def read_shared_values_yaml(self, stack: str) -> Optional[Dict[str, Any]]:
+        """Read and parse <stack>/shared-values.yaml.
+        
+        Args:
+            stack: Stack name to read shared values for
+            
+        Returns:
+            Dictionary with shared values contents or None if file doesn't exist
+        """
+        file_path = Path(stack) / "shared-values.yaml"
+        if not file_path.exists():
+            return None
+        
+        try:
+            with file_path.open() as f:
+                return yaml.safe_load(f)
+        except yaml.YAMLError:
+            return None
+    
     # -----------------------------------------------------------------------------
     # Git Operations
     # -----------------------------------------------------------------------------
@@ -240,6 +259,10 @@ class IOLayer:
         Returns:
             PR URL if created, None if dry run
         """
+        print(f"🚀 Creating PR: '{title}'")
+        print(f"   - Base: {base_branch}, Head: {branch_name}")
+        print(f"   - Auto-merge requested: {'YES' if auto_merge else 'NO'}")
+        
         if self.dry_run:
             merge_status = "and auto-merge" if auto_merge else "without auto-merge"
             print(f"[DRY RUN] Would create PR: '{title}' {merge_status}")
@@ -262,7 +285,10 @@ class IOLayer:
         
         # Auto-merge if requested
         if auto_merge:
+            print(f"🔄 Auto-merge requested - attempting to merge PR...")
             self._attempt_auto_merge(pr)
+        else:
+            print(f"⏸️ Auto-merge NOT requested - PR left for manual review")
         
         return pr.html_url
     
@@ -338,7 +364,12 @@ class IOLayer:
         Returns:
             PR URL if created, None if dry run
         """
+        # Always start from the base branch before creating new branch
+        print(f"🔀 Switching to base branch: {base_branch}")
+        self.checkout_branch(base_branch, create=False)
+        
         # Create and checkout branch
+        print(f"🌿 Creating new branch: {branch_name} from {base_branch}")
         self.checkout_branch(branch_name, create=True)
         
         # Add and commit files (files should already exist on disk)

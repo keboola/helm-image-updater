@@ -120,30 +120,34 @@ def cli_test_env(mock_repo, mock_github_repo, tmp_path):
 
 
 def setup_test_stacks(base_path):
-    """Create test stack structure with tag.yaml files."""
-    # Create dev stack
-    dev_stack = base_path / "dev-keboola-gcp-us-central1"
-    dev_stack.mkdir()
-    (dev_stack / "test-chart").mkdir()
-    create_tag_yaml(dev_stack / "test-chart" / "tag.yaml", "old-tag")
+    """Create test stack structure with tag.yaml and shared-values.yaml files."""
+    # Create dev stacks (3 clouds)
+    create_stack_with_shared_values(base_path / "dev-keboola-gcp-us-central1", "gcp")
+    create_stack_with_shared_values(base_path / "kbc-testing-azure-east-us-2", "azure")
+    create_stack_with_shared_values(base_path / "dev-keboola-aws-eu-west-1", "aws")
 
-    # Create production stack
-    prod_stack = base_path / "com-keboola-prod"
-    prod_stack.mkdir()
-    (prod_stack / "test-chart").mkdir()
-    create_tag_yaml(prod_stack / "test-chart" / "tag.yaml", "old-tag")
+    # Create production stacks (3 clouds) 
+    create_stack_with_shared_values(base_path / "com-keboola-gcp-prod", "gcp")
+    create_stack_with_shared_values(base_path / "com-keboola-azure-prod", "azure")
+    create_stack_with_shared_values(base_path / "com-keboola-aws-prod", "aws")
 
     # Create canary stack
-    canary_stack = base_path / "dev-keboola-canary-orion"
-    canary_stack.mkdir()
-    (canary_stack / "test-chart").mkdir()
-    create_tag_yaml(canary_stack / "test-chart" / "tag.yaml", "old-tag")
+    create_stack_with_shared_values(base_path / "dev-keboola-canary-orion", "gcp")
 
-    # Create e2e dev stack
-    e2e_dev_stack = base_path / "dev-keboola-gcp-us-east1-e2e"
-    e2e_dev_stack.mkdir()
-    (e2e_dev_stack / "test-chart").mkdir()
-    create_tag_yaml(e2e_dev_stack / "test-chart" / "tag.yaml", "old-tag")
+    # Create e2e dev stack (excluded)
+    create_stack_with_shared_values(base_path / "dev-keboola-gcp-us-east1-e2e", "gcp")
+
+
+def create_stack_with_shared_values(stack_path, cloud_provider):
+    """Helper to create stack with both tag.yaml and shared-values.yaml."""
+    stack_path.mkdir()
+    (stack_path / "test-chart").mkdir()
+    create_tag_yaml(stack_path / "test-chart" / "tag.yaml", "old-tag")
+    
+    # Create shared-values.yaml
+    shared_values = {"cloudProvider": cloud_provider}
+    with open(stack_path / "shared-values.yaml", "w") as f:
+        yaml.dump(shared_values, f)
 
 
 def create_tag_yaml(path, tag):
@@ -245,7 +249,7 @@ def test_dev_tag_update(cli_test_env, mock_git_operations, capsys):
 
     # Verify tag.yaml was NOT updated in prod stack
     prod_tag_yaml = read_tag_yaml(
-        base_dir / "com-keboola-prod" / "test-chart" / "tag.yaml"
+        base_dir / "com-keboola-gcp-prod" / "test-chart" / "tag.yaml"
     )
     assert prod_tag_yaml["image"]["tag"] == "old-tag"
 
@@ -314,7 +318,7 @@ def test_production_tag_update(cli_test_env, mock_git_operations, capsys):
     assert dev_tag_yaml["image"]["tag"] == "production-1.2.3"
 
     prod_tag_yaml = read_tag_yaml(
-        base_dir / "com-keboola-prod" / "test-chart" / "tag.yaml"
+        base_dir / "com-keboola-gcp-prod" / "test-chart" / "tag.yaml"
     )
     assert prod_tag_yaml["image"]["tag"] == "production-1.2.3"
 
@@ -394,7 +398,7 @@ def test_canary_tag_update(cli_test_env, capsys):
     assert dev_tag_yaml["image"]["tag"] == "old-tag"
 
     prod_tag_yaml = read_tag_yaml(
-        base_dir / "com-keboola-prod" / "test-chart" / "tag.yaml"
+        base_dir / "com-keboola-gcp-prod" / "test-chart" / "tag.yaml"
     )
     assert prod_tag_yaml["image"]["tag"] == "old-tag"    
 
@@ -698,22 +702,20 @@ def test_nonexistent_stack_override(cli_test_env, capsys):
     assert len(created_prs) == 0
 
 
-def test_multi_stage_automerge_true(cli_test_env, capsys):
-    """Test multi-stage deployment with automerge=true.
+def test_multi_cloud_multi_stage_automerge_true(cli_test_env, capsys):
+    """Test multi-cloud multi-stage deployment with automerge=true.
 
     This test verifies that:
     1. With multi-stage=true and automerge=true
-    2. For production tags, it creates:
-       - Dev PR with [multi-stage] [test sync] that has automerge=true
-       - Prod PR with [multi-stage] [prod sync] that has automerge=false
-    3. The automerge setting for dev stacks is true (as requested)
-    4. The automerge setting for prod stacks is forced to false (regardless of input)
-    5. The prod PR title uses regular [prod sync] format when automerge=true is requested
-       (This allows workflow to find it even though the PR itself won't auto-merge)
+    2. For production tags, it creates 6 PRs:
+       - 3 Dev PRs with [multi-stage] [test sync {cloud}] that have automerge=true
+       - 3 Prod PRs with [multi-stage] [prod sync {cloud}] that have automerge=false
+    3. Each cloud (aws, azure, gcp) gets both dev and prod PRs
+    4. The automerge setting for dev stacks is true, prod stacks is false
     """
     base_dir, mock_repo, mock_github_repo = cli_test_env
 
-    # Set environment variables for multi-stage deployment
+    # Set environment variables for multi-cloud multi-stage deployment
     os.environ["HELM_CHART"] = "test-chart"
     os.environ["IMAGE_TAG"] = "production-1.2.3"
     os.environ["MULTI_STAGE"] = "true"
@@ -745,57 +747,67 @@ def test_multi_stage_automerge_true(cli_test_env, capsys):
     assert "Multi-stage deployment: True" in captured.out
     assert "Automerge: True" in captured.out
 
-    # Verify 2 PRs were created
-    assert len(created_prs) == 2, "Should create exactly 2 PRs"
+    # Verify 6 PRs were created (3 dev + 3 prod)
+    assert len(created_prs) == 6, f"Should create exactly 6 PRs, got {len(created_prs)}"
 
     # Debug: Print all PR titles for inspection
     print("DEBUG: All PR titles:")
     for pr in created_prs:
         print(f"  - '{pr['title']}' (automerge: {pr['automerge']})")
 
-    # Find dev and prod PRs
-    dev_pr = next(
-        (pr for pr in created_prs if "[multi-stage] [test sync]" in pr["title"]), None
-    )
-    prod_pr = next(
-        (pr for pr in created_prs if "[multi-stage] [prod sync]" in pr["title"]), None
-    )
+    # Find dev and prod PRs by cloud
+    dev_prs = {}
+    prod_prs = {}
+    
+    for pr in created_prs:
+        if "[multi-stage] [test sync" in pr["title"]:
+            # Extract cloud from title like "[multi-stage] [test sync aws]"
+            for cloud in ["aws", "azure", "gcp"]:
+                if f"[test sync {cloud}]" in pr["title"]:
+                    dev_prs[cloud] = pr
+                    break
+        elif "[multi-stage] [prod sync" in pr["title"]:
+            # Extract cloud from title like "[multi-stage] [prod sync aws]"
+            for cloud in ["aws", "azure", "gcp"]:
+                if f"[prod sync {cloud}]" in pr["title"]:
+                    prod_prs[cloud] = pr
+                    break
 
-    # Verify PRs exist with correct settings
-    assert dev_pr is not None, "Should create a dev PR with [multi-stage] [test sync]"
-    assert prod_pr is not None, "Should create a prod PR with [multi-stage] [prod sync]"
+    # Verify all cloud PRs exist
+    expected_clouds = ["aws", "azure", "gcp"]
+    for cloud in expected_clouds:
+        assert cloud in dev_prs, f"Should create dev PR for {cloud}"
+        assert cloud in prod_prs, f"Should create prod PR for {cloud}"
 
-    # Verify automerge settings
-    assert dev_pr["automerge"] is True, "Dev PR should have automerge=True"
-    assert prod_pr["automerge"] is False, (
-        "Prod PR should have automerge=False (forced by multi-stage)"
-    )
+    # Verify automerge settings for all clouds
+    for cloud in expected_clouds:
+        assert dev_prs[cloud]["automerge"] is True, f"Dev {cloud} PR should have automerge=True"
+        assert prod_prs[cloud]["automerge"] is False, f"Prod {cloud} PR should have automerge=False"
 
-    # Verify complete PR title prefixes
-    assert dev_pr["title"].startswith("[multi-stage] [test sync]"), (
-        "Dev PR should start with [multi-stage] [test sync]"
-    )
-    assert prod_pr["title"].startswith("[multi-stage] [prod sync]"), (
-        "Prod PR should start with [multi-stage] [prod sync]"
-    )
+    # Verify PR title patterns
+    for cloud in expected_clouds:
+        assert dev_prs[cloud]["title"].startswith(f"[multi-stage] [test sync {cloud}]"), (
+            f"Dev {cloud} PR should start with [multi-stage] [test sync {cloud}]"
+        )
+        assert prod_prs[cloud]["title"].startswith(f"[multi-stage] [prod sync {cloud}]"), (
+            f"Prod {cloud} PR should start with [multi-stage] [prod sync {cloud}]"
+        )
 
 
-def test_multi_stage_with_automerge_false(cli_test_env, capsys):
-    """Test multi-stage deployment with automerge=false.
+def test_multi_cloud_multi_stage_automerge_false(cli_test_env, capsys):
+    """Test multi-cloud multi-stage deployment with automerge=false.
 
     This test verifies that:
     1. With multi-stage=true and automerge=false
-    2. For production tags, it creates:
-       - Dev PR with [multi-stage] [test sync manual] that respects the automerge=false setting
-       - Prod PR with [multi-stage] [prod sync manual] that is NOT auto-merged
-    3. The automerge setting for dev stacks respects user's setting
-    4. The automerge setting for prod stacks is always forced to false
-    5. The PR titles use different formats that won't match automated workflows
-       (This prevents automated workflows from finding these PRs)
+    2. For production tags, it creates 6 PRs:
+       - 3 Dev PRs with [multi-stage] [test sync {cloud} manual] that respect automerge=false
+       - 3 Prod PRs with [multi-stage] [prod sync {cloud}] that are NOT auto-merged
+    3. Each cloud (aws, azure, gcp) gets both dev and prod PRs
+    4. All PRs have automerge=false due to user preference and multi-stage prod rule
     """
     base_dir, mock_repo, mock_github_repo = cli_test_env
 
-    # Set environment variables for multi-stage deployment with automerge=false
+    # Set environment variables for multi-cloud multi-stage deployment with automerge=false
     os.environ["HELM_CHART"] = "test-chart"
     os.environ["IMAGE_TAG"] = "production-1.2.3"
     os.environ["MULTI_STAGE"] = "true"
@@ -827,43 +839,52 @@ def test_multi_stage_with_automerge_false(cli_test_env, capsys):
     assert "Multi-stage deployment: True" in captured.out
     assert "Automerge: False" in captured.out
 
-    # Verify 2 PRs were created
-    assert len(created_prs) == 2, "Should create exactly 2 PRs"
+    # Verify 6 PRs were created (3 dev + 3 prod)
+    assert len(created_prs) == 6, f"Should create exactly 6 PRs, got {len(created_prs)}"
 
     # Debug: Print all PR titles for inspection
     print("DEBUG: All PR titles:")
     for pr in created_prs:
         print(f"  - '{pr['title']}' (automerge: {pr['automerge']})")
 
-    # Find dev and prod PRs
-    dev_pr = next(
-        (pr for pr in created_prs if "[multi-stage] [test sync manual]" in pr["title"]),
-        None,
-    )
-    prod_pr = next(
-        (pr for pr in created_prs if "[multi-stage] [prod sync manual]" in pr["title"]),
-        None,
-    )
+    # Find dev and prod PRs by cloud
+    dev_prs = {}
+    prod_prs = {}
+    
+    for pr in created_prs:
+        if "[multi-stage] [test sync" in pr["title"]:
+            # Extract cloud from title like "[multi-stage] [test sync aws manual]"
+            for cloud in ["aws", "azure", "gcp"]:
+                if f"[test sync {cloud} manual]" in pr["title"]:
+                    dev_prs[cloud] = pr
+                    break
+        elif "[multi-stage] [prod sync" in pr["title"]:
+            # Extract cloud from title like "[multi-stage] [prod sync aws]"
+            for cloud in ["aws", "azure", "gcp"]:
+                if f"[prod sync {cloud}]" in pr["title"]:
+                    prod_prs[cloud] = pr
+                    break
 
-    # Verify PRs exist with correct settings
-    assert dev_pr is not None, (
-        "Should create a dev PR with [multi-stage] [test sync manual]"
-    )
-    assert prod_pr is not None, (
-        "Should create a prod PR with [multi-stage] [prod sync manual]"
-    )
+    # Verify all cloud PRs exist
+    expected_clouds = ["aws", "azure", "gcp"]
+    for cloud in expected_clouds:
+        assert cloud in dev_prs, f"Should create dev PR for {cloud}"
+        assert cloud in prod_prs, f"Should create prod PR for {cloud}"
 
-    # Verify automerge settings
-    assert dev_pr["automerge"] is False, "Dev PR should have automerge=False"
-    assert prod_pr["automerge"] is False, "Prod PR should have automerge=False"
+    # Verify automerge settings for all clouds (all should be False)
+    for cloud in expected_clouds:
+        assert dev_prs[cloud]["automerge"] is False, f"Dev {cloud} PR should have automerge=False"
+        assert prod_prs[cloud]["automerge"] is False, f"Prod {cloud} PR should have automerge=False"
 
-    # Verify complete PR title prefixes
-    assert dev_pr["title"].startswith("[multi-stage] [test sync manual]"), (
-        "Dev PR should start with [multi-stage] [test sync manual]"
-    )
-    assert prod_pr["title"].startswith("[multi-stage] [prod sync manual]"), (
-        "Prod PR should start with [multi-stage] [prod sync manual]"
-    )
+    # Verify PR title patterns
+    for cloud in expected_clouds:
+        assert dev_prs[cloud]["title"].startswith(f"[multi-stage] [test sync {cloud} manual]"), (
+            f"Dev {cloud} PR should start with [multi-stage] [test sync {cloud} manual]"
+        )
+        assert prod_prs[cloud]["title"].startswith(f"[multi-stage] [prod sync {cloud}]"), (
+            f"Prod {cloud} PR should start with [multi-stage] [prod sync {cloud}]"
+        )
+
 
 
 def test_dry_run(cli_test_env, capsys):
@@ -950,7 +971,7 @@ def test_custom_tag_with_override_stack(cli_test_env, capsys):
 
     # Verify other stacks were NOT updated
     prod_tag_yaml = read_tag_yaml(
-        base_dir / "com-keboola-prod" / "test-chart" / "tag.yaml"
+        base_dir / "com-keboola-gcp-prod" / "test-chart" / "tag.yaml"
     )
     assert prod_tag_yaml["image"]["tag"] == "old-tag"
 
@@ -974,7 +995,7 @@ def test_dev_tag_with_production_override_stack(cli_test_env, capsys):
     # Set environment variables with dev tag and production stack override
     os.environ["HELM_CHART"] = "test-chart"
     os.environ["IMAGE_TAG"] = "dev-123-tag"  # Dev tag
-    os.environ["OVERRIDE_STACK"] = "com-keboola-prod"  # Production stack
+    os.environ["OVERRIDE_STACK"] = "com-keboola-gcp-prod"  # Production stack
 
     # Track PRs
     created_prs = []
@@ -998,7 +1019,7 @@ def test_dev_tag_with_production_override_stack(cli_test_env, capsys):
 
     # Verify tag.yaml was NOT updated in the production stack
     prod_tag_yaml = read_tag_yaml(
-        base_dir / "com-keboola-prod" / "test-chart" / "tag.yaml"
+        base_dir / "com-keboola-gcp-prod" / "test-chart" / "tag.yaml"
     )
     assert prod_tag_yaml["image"]["tag"] == "old-tag"
 
@@ -1070,7 +1091,7 @@ def test_happy_path_production_update(cli_test_env, mock_git_operations, capsys)
 
     # Verify console output shows updates for both dev and prod stacks
     assert "Updated dev-keboola-gcp-us-central1/test-chart/tag.yaml: image.tag from old-tag to production-2.0.0" in captured.out
-    assert "Updated com-keboola-prod/test-chart/tag.yaml: image.tag from old-tag to production-2.0.0" in captured.out
+    assert "Updated com-keboola-gcp-prod/test-chart/tag.yaml: image.tag from old-tag to production-2.0.0" in captured.out
 
     # Verify Git operations were performed
     assert mock_git_operations['checkout_branch'].called, "git checkout should be called"
@@ -1124,7 +1145,7 @@ def test_semver_main_image_tag(cli_test_env, capsys):
     assert dev_tag_yaml["image"]["tag"] == "1.2.3"
 
     prod_tag_yaml = read_tag_yaml(
-        base_dir / "com-keboola-prod" / "test-chart" / "tag.yaml"
+        base_dir / "com-keboola-gcp-prod" / "test-chart" / "tag.yaml"
     )
     assert prod_tag_yaml["image"]["tag"] == "1.2.3"
 
@@ -1158,7 +1179,7 @@ def test_semver_main_image_tag(cli_test_env, capsys):
     assert dev_tag_yaml["image"]["tag"] == "v2.3.4"
 
     prod_tag_yaml = read_tag_yaml(
-        base_dir / "com-keboola-prod" / "test-chart" / "tag.yaml"
+        base_dir / "com-keboola-gcp-prod" / "test-chart" / "tag.yaml"
     )
     assert prod_tag_yaml["image"]["tag"] == "v2.3.4"
 
