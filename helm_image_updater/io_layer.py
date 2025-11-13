@@ -292,41 +292,106 @@ class IOLayer:
         
         return pr.html_url
     
-    def _attempt_auto_merge(self, pr, max_retries: int = 5, retry_delay: int = 5):
-        """Attempt to auto-merge a PR with retries.
+    def _get_wait_time(self, attempt: int) -> int:
+        """Calculate wait time based on attempt number using exponential backoff.
+        
+        Args:
+            attempt: Current attempt number (1-indexed)
+            
+        Returns:
+            Wait time in seconds
+        """
+        if attempt <= 5:
+            return 2
+        elif attempt <= 10:
+            return 4
+        elif attempt <= 15:
+            return 8
+        elif attempt <= 20:
+            return 15
+        else:
+            return 30
+    
+    def _attempt_auto_merge(self, pr, max_retries: int = 30):
+        """Attempt to auto-merge a PR with retries and exponential backoff.
         
         Args:
             pr: GitHub PR object
-            max_retries: Maximum number of retry attempts
-            retry_delay: Delay between retries in seconds
+            max_retries: Maximum number of retry attempts (default: 30)
+            
+        Raises:
+            RuntimeError: If PR cannot be merged after all retry attempts
         """
-        for attempt in range(max_retries):
+        merged_successfully = False
+        
+        for attempt in range(1, max_retries + 1):
             try:
-                pr.update()  # Refresh PR data
+                pr.update()
                 
-                if pr.mergeable is None:
-                    print(f"PR mergeability not yet determined, waiting... (attempt {attempt + 1}/{max_retries})")
-                    sleep(retry_delay)
-                    continue
-                elif not pr.mergeable:
-                    print(f"PR is not mergeable due to conflicts: {pr.html_url}")
+                if pr.merged:
+                    print(f"✅ PR already merged: {pr.html_url}")
+                    merged_successfully = True
                     break
                 
+                if pr.state == "closed" and not pr.merged:
+                    raise RuntimeError(f"❌ PR was closed without merging: {pr.html_url}")
+                
+                mergeable_state = getattr(pr, "mergeable_state", None)
+                
+                if pr.mergeable is None or mergeable_state in (None, "unknown"):
+                    wait_time = self._get_wait_time(attempt)
+                    print(f"PR mergeability not yet determined (state={mergeable_state}), waiting {wait_time}s... (attempt {attempt}/{max_retries})")
+                    sleep(wait_time)
+                    continue
+                
+                if pr.mergeable is False:
+                    if mergeable_state in ("blocked", "behind", "unstable", "draft"):
+                        wait_time = self._get_wait_time(attempt)
+                        print(f"PR not mergeable yet (state={mergeable_state}), waiting {wait_time}s... (attempt {attempt}/{max_retries})")
+                        sleep(wait_time)
+                        continue
+                    else:
+                        raise RuntimeError(f"❌ PR is not mergeable due to conflicts (state={mergeable_state}): {pr.html_url}")
+                
                 pr.merge()
-                print(f"PR automatically merged: {pr.html_url}")
-                break
+                pr.update()
+                
+                if pr.merged:
+                    print(f"✅ PR automatically merged: {pr.html_url}")
+                    merged_successfully = True
+                    break
+                else:
+                    wait_time = self._get_wait_time(attempt)
+                    print(f"Merge initiated but not confirmed yet, waiting {wait_time}s... (attempt {attempt}/{max_retries})")
+                    sleep(wait_time)
+                    continue
                 
             except GithubException as e:
-                error_message = str(e.data.get("message", "")).lower()
-                if e.status == 405 and "not mergeable" in error_message:
-                    if attempt < max_retries - 1:
-                        print(f"PR not ready to merge, waiting... (attempt {attempt + 1}/{max_retries})")
-                        sleep(retry_delay)
+                error_message = str(e.data.get("message", "")) if hasattr(e, 'data') else str(e)
+                error_status = getattr(e, "status", None)
+                
+                if error_status in (405, 409) or "not mergeable" in error_message.lower():
+                    if attempt < max_retries:
+                        wait_time = self._get_wait_time(attempt)
+                        print(f"PR not ready to merge ({error_message}), waiting {wait_time}s... (attempt {attempt}/{max_retries})")
+                        sleep(wait_time)
+                        continue
                     else:
-                        print(f"Failed to merge PR after {max_retries} attempts: {pr.html_url}")
-                        raise
+                        raise RuntimeError(f"❌ Failed to merge PR after {max_retries} attempts: {error_message}")
                 else:
                     raise
+        
+        if not merged_successfully:
+            pr.update()
+            if pr.merged:
+                print(f"✅ PR merged while waiting: {pr.html_url}")
+                return
+            
+            raise RuntimeError(
+                f"❌ ERROR: Failed to auto-merge PR after {max_retries} attempts\n"
+                f"   PR URL: {pr.html_url}\n"
+                f"   PR is still open and requires manual intervention"
+            )
     
     # -----------------------------------------------------------------------------
     # High-Level Combined Operations
