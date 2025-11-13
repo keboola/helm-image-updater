@@ -294,7 +294,7 @@ class IOLayer:
         
         return pr.html_url
     
-    def _attempt_auto_merge(self, pr, max_retries: int = 5, retry_delay: int = 5):
+    def _attempt_auto_merge(self, pr, max_retries: int = 10, retry_delay: int = 5):
         """Attempt to auto-merge a PR with retries.
 
         Args:

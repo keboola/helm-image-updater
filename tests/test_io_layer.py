@@ -173,7 +173,7 @@ class TestAutoMerge:
                 )
 
             # Verify exception details
-            assert "Failed to auto-merge PR after 5 attempts" in str(exc_info.value)
+            assert "Failed to auto-merge PR after 10 attempts" in str(exc_info.value)
             assert exc_info.value.pr_url == "https://github.com/test/repo/pull/404"
 
         # Verify PR was created before merge failed
