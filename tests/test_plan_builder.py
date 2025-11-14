@@ -12,7 +12,7 @@ import pytest
 import yaml
 from helm_image_updater.io_layer import IOLayer
 from helm_image_updater.environment import EnvironmentConfig
-from helm_image_updater.plan_builder import prepare_plan, _group_changes_for_prs
+from helm_image_updater.plan_builder import prepare_plan
 from helm_image_updater.models import UpdatePlan, UpdateStrategy
 from unittest.mock import Mock
 
@@ -161,10 +161,11 @@ def test_extra_tags_calculation(test_stacks):
 # Multi-cloud grouping tests
 def test_multi_cloud_multi_stage_grouping_production_tag(test_stacks):
     """Test multi-cloud multi-stage grouping logic for production tags."""
-    from helm_image_updater.plan_builder import _group_changes_for_prs
-    
+    from helm_image_updater.grouping_strategies import GroupingStrategyHandler, GroupingContext
+    from helm_image_updater.models import GroupingStrategy
+
     os.chdir(test_stacks["base_dir"])
-    
+
     # Create mock I/O layer that can read shared-values.yaml
     mock_io_layer = Mock()
     def mock_shared_values(stack):
@@ -179,31 +180,42 @@ def test_multi_cloud_multi_stage_grouping_production_tag(test_stacks):
         return cloud_mapping.get(stack)
     mock_io_layer.read_shared_values_yaml.side_effect = mock_shared_values
 
-    # Create mock environment config
+    # Create mock environment config with LEGACY mode to test old behavior
     mock_config = Mock()
     mock_config.automerge = True
-    
+    mock_config.multi_stage = True
+    mock_config.grouping_strategy = GroupingStrategy.LEGACY
+
     # Create mock plan
     mock_plan = Mock()
     mock_plan.multi_stage = True
     mock_plan.strategy = UpdateStrategy.PRODUCTION
-    
+    mock_plan.override_stack = None
+
     # Create mock stack changes for all 6 stacks
     stack_changes = []
     all_stacks = [
         "dev-keboola-gcp-us-central1", "kbc-testing-azure-east-us-2", "dev-keboola-aws-eu-west-1",
         "com-keboola-gcp-prod", "com-keboola-azure-prod", "com-keboola-aws-prod"
     ]
-    
+
     for stack in all_stacks:
         stack_changes.append({
             'stack': stack,
             'file_change': Mock(),
             'changes': []
         })
-    
-    # Test the grouping
-    groups = _group_changes_for_prs(stack_changes, mock_plan, mock_config, mock_io_layer)
+
+    # Test the grouping using new handler
+    handler = GroupingStrategyHandler()
+    context = GroupingContext(
+        config=mock_config,
+        plan=mock_plan,
+        stack_changes=stack_changes,
+        io_layer=mock_io_layer,
+        env={}
+    )
+    groups = handler.group_changes(context)
     
     # Verify 6 groups were created (3 dev + 3 prod)
     assert len(groups) == 6, f"Expected 6 groups, got {len(groups)}"
@@ -232,38 +244,50 @@ def test_multi_cloud_multi_stage_grouping_production_tag(test_stacks):
 
 def test_multi_cloud_grouping_non_multi_stage(test_stacks):
     """Test that non-multi-stage deployments still work correctly."""
-    from helm_image_updater.plan_builder import _group_changes_for_prs
-    
+    from helm_image_updater.grouping_strategies import GroupingStrategyHandler, GroupingContext
+    from helm_image_updater.models import GroupingStrategy
+
     os.chdir(test_stacks["base_dir"])
-    
+
     # Create mock I/O layer
     mock_io_layer = Mock()
-    
-    # Create mock environment config
+
+    # Create mock environment config with LEGACY mode for backward compat
     mock_config = Mock()
     mock_config.automerge = True
-    
+    mock_config.multi_stage = False  # Non-multi-stage
+    mock_config.grouping_strategy = GroupingStrategy.LEGACY
+
     # Create mock plan (non-multi-stage)
     mock_plan = Mock()
     mock_plan.multi_stage = False  # Non-multi-stage
     mock_plan.strategy = UpdateStrategy.PRODUCTION
-    
+    mock_plan.override_stack = None
+
     # Create mock stack changes for all 6 stacks
     stack_changes = []
     all_stacks = [
         "dev-keboola-gcp-us-central1", "kbc-testing-azure-east-us-2", "dev-keboola-aws-eu-west-1",
         "com-keboola-gcp-prod", "com-keboola-azure-prod", "com-keboola-aws-prod"
     ]
-    
+
     for stack in all_stacks:
         stack_changes.append({
             'stack': stack,
             'file_change': Mock(),
             'changes': []
         })
-    
-    # Test the grouping
-    groups = _group_changes_for_prs(stack_changes, mock_plan, mock_config, mock_io_layer)
+
+    # Test the grouping using new handler
+    handler = GroupingStrategyHandler()
+    context = GroupingContext(
+        config=mock_config,
+        plan=mock_plan,
+        stack_changes=stack_changes,
+        io_layer=mock_io_layer,
+        env={}
+    )
+    groups = handler.group_changes(context)
     
     # Verify only 1 group was created (normal behavior for non-multi-stage)
     assert len(groups) == 1, f"Non-multi-stage should create 1 group, got {len(groups)}"
@@ -275,35 +299,47 @@ def test_multi_cloud_grouping_non_multi_stage(test_stacks):
 
 def test_multi_cloud_grouping_dev_strategy(test_stacks):
     """Test multi-cloud grouping with dev strategy (should not use multi-stage logic)."""
-    from helm_image_updater.plan_builder import _group_changes_for_prs
-    
+    from helm_image_updater.grouping_strategies import GroupingStrategyHandler, GroupingContext
+    from helm_image_updater.models import GroupingStrategy
+
     os.chdir(test_stacks["base_dir"])
-    
+
     # Create mock I/O layer
     mock_io_layer = Mock()
-    
-    # Create mock environment config
+
+    # Create mock environment config with LEGACY mode
     mock_config = Mock()
     mock_config.automerge = True
-    
+    mock_config.multi_stage = True
+    mock_config.grouping_strategy = GroupingStrategy.LEGACY
+
     # Create mock plan (dev strategy, even with multi_stage=True)
     mock_plan = Mock()
     mock_plan.multi_stage = True
     mock_plan.strategy = UpdateStrategy.DEV  # Dev strategy
-    
+    mock_plan.override_stack = None
+
     # Create mock stack changes for dev stacks only
     stack_changes = []
     dev_stacks = ["dev-keboola-gcp-us-central1", "kbc-testing-azure-east-us-2", "dev-keboola-aws-eu-west-1"]
-    
+
     for stack in dev_stacks:
         stack_changes.append({
             'stack': stack,
             'file_change': Mock(),
             'changes': []
         })
-    
-    # Test the grouping
-    groups = _group_changes_for_prs(stack_changes, mock_plan, mock_config, mock_io_layer)
+
+    # Test the grouping using new handler
+    handler = GroupingStrategyHandler()
+    context = GroupingContext(
+        config=mock_config,
+        plan=mock_plan,
+        stack_changes=stack_changes,
+        io_layer=mock_io_layer,
+        env={}
+    )
+    groups = handler.group_changes(context)
     
     # Verify only 1 group was created (dev strategy doesn't use multi-cloud logic)
     assert len(groups) == 1, f"Dev strategy should create 1 group regardless of multi-stage, got {len(groups)}"

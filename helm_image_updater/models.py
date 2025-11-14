@@ -14,6 +14,22 @@ class UpdateStrategy(Enum):
     INVALID = "invalid"
 
 
+class GroupingStrategy(Enum):
+    """Strategies for grouping stacks into pull requests."""
+    LEGACY = "legacy"                      # Current behavior (default for compatibility)
+    SINGLE = "single"                      # One PR for all stacks
+    STACK = "stack"                        # One PR per stack
+    CLOUD_MULTI_STAGE = "cloud-multi-stage"  # Cloud×Stage matrix (replaces MULTI_STAGE)
+
+
+class PRType(Enum):
+    """Types of pull requests with specific merge behaviors."""
+    STANDARD = "standard"                  # Regular PR
+    MULTI_STAGE_DEV = "multi_stage_dev"   # Multi-stage dev PR (can auto-merge)
+    MULTI_STAGE_PROD = "multi_stage_prod" # Multi-stage prod PR (never auto-merges)
+    CANARY = "canary"                     # Canary PR (always auto-merges)
+
+
 @dataclass
 class TagChange:
     """Represents a change to be made to a tag."""
@@ -42,6 +58,8 @@ class PRPlan:
     auto_merge: bool
     files_to_commit: List[str]  # List of file paths that will be committed
     commit_message: str
+    pr_type: PRType = PRType.STANDARD  # Type of PR for merge behavior rules
+    cloud_provider: Optional[str] = None  # For cloud-specific PRs
     
     
 @dataclass
