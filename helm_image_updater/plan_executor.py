@@ -82,8 +82,6 @@ def _execute_pr_plans(plan: UpdatePlan, io_layer: IOLayer, result: ExecutionResu
             io_layer.write_file_changes(relevant_file_changes)
             
             # Step 2: Create branch, commit, and PR (files already exist on disk)
-            print(f"🔍 DEBUG: About to call create_branch_commit_and_pr with auto_merge={pr_plan.auto_merge}")
-            print(f"🔍 DEBUG: PR title: {pr_plan.pr_title}")
             pr_url = io_layer.create_branch_commit_and_pr(
                 branch_name=pr_plan.branch_name,
                 files_to_commit=pr_plan.files_to_commit,  # List[str] - just paths
@@ -93,11 +91,10 @@ def _execute_pr_plans(plan: UpdatePlan, io_layer: IOLayer, result: ExecutionResu
                 base_branch=pr_plan.base_branch,
                 auto_merge=pr_plan.auto_merge
             )
-            
+
             if pr_url:
                 result.pr_urls.append(pr_url)
+                # Note: Auto-merge status is already printed in io_layer
                 print(f"Created PR: {pr_plan.pr_title}")
-                if pr_plan.auto_merge:
-                    print(f"  Auto-merged: {pr_url}")
             else:
                 result.errors.append(f"Failed to create PR: {pr_plan.pr_title}")

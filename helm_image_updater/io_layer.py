@@ -17,6 +17,8 @@ from github import Github
 from github.GithubException import GithubException
 from time import sleep
 
+from .exceptions import AutoMergeError
+
 
 class IOLayer:
     """Handles all I/O operations for the application."""
@@ -292,30 +294,43 @@ class IOLayer:
         
         return pr.html_url
     
-    def _attempt_auto_merge(self, pr, max_retries: int = 5, retry_delay: int = 5):
+    def _attempt_auto_merge(self, pr, max_retries: int = 10, retry_delay: int = 5):
         """Attempt to auto-merge a PR with retries.
-        
+
         Args:
             pr: GitHub PR object
             max_retries: Maximum number of retry attempts
             retry_delay: Delay between retries in seconds
+
+        Raises:
+            AutoMergeError: If PR cannot be merged after max_retries or has conflicts
+            GithubException: For other GitHub API errors
         """
         for attempt in range(max_retries):
             try:
                 pr.update()  # Refresh PR data
-                
+
                 if pr.mergeable is None:
                     print(f"PR mergeability not yet determined, waiting... (attempt {attempt + 1}/{max_retries})")
-                    sleep(retry_delay)
-                    continue
+                    if attempt < max_retries - 1:
+                        sleep(retry_delay)
+                        continue
+                    else:
+                        # Exhausted retries with mergeable still None
+                        error_msg = f"Failed to auto-merge PR after {max_retries} attempts: PR mergeability could not be determined. PR: {pr.html_url}"
+                        raise AutoMergeError(error_msg, pr_url=pr.html_url)
                 elif not pr.mergeable:
-                    print(f"PR is not mergeable due to conflicts: {pr.html_url}")
-                    break
-                
+                    error_msg = f"PR is not mergeable due to conflicts: {pr.html_url}"
+                    print(error_msg)
+                    raise AutoMergeError(error_msg, pr_url=pr.html_url)
+
                 pr.merge()
                 print(f"PR automatically merged: {pr.html_url}")
-                break
-                
+                return  # Successfully merged
+
+            except AutoMergeError:
+                # Re-raise AutoMergeError without modification
+                raise
             except GithubException as e:
                 error_message = str(e.data.get("message", "")).lower()
                 if e.status == 405 and "not mergeable" in error_message:
@@ -323,8 +338,9 @@ class IOLayer:
                         print(f"PR not ready to merge, waiting... (attempt {attempt + 1}/{max_retries})")
                         sleep(retry_delay)
                     else:
-                        print(f"Failed to merge PR after {max_retries} attempts: {pr.html_url}")
-                        raise
+                        error_msg = f"Failed to merge PR after {max_retries} attempts: {pr.html_url}"
+                        print(error_msg)
+                        raise AutoMergeError(error_msg, pr_url=pr.html_url)
                 else:
                     raise
     
