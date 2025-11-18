@@ -332,10 +332,10 @@ class IOLayer:
                 # Re-raise AutoMergeError without modification
                 raise
             except GithubException as e:
-                error_message = str(e.data.get("message", "")).lower()
-                if e.status == 405 and "not mergeable" in error_message:
+                if e.status == 405:
                     if attempt < max_retries - 1:
-                        print(f"PR not ready to merge, waiting... (attempt {attempt + 1}/{max_retries})")
+                        error_message = str(e.data.get("message", ""))
+                        print(f"PR not ready to merge ({error_message}), waiting... (attempt {attempt + 1}/{max_retries})")
                         sleep(retry_delay)
                     else:
                         error_msg = f"Failed to merge PR after {max_retries} attempts: {pr.html_url}"

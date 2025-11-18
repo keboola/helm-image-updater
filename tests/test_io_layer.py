@@ -128,6 +128,29 @@ class TestAutoMerge:
         # Verify merge was attempted 3 times
         assert mock_pr.merge.call_count == 3
 
+    def test_auto_merge_base_branch_modified_retries_then_succeeds(self, io_layer):
+        """Test that 405 'Base branch was modified' exception triggers retries and succeeds."""
+        # Create a mock PR
+        mock_pr = MagicMock()
+        mock_pr.html_url = "https://github.com/test/repo/pull/203"
+        mock_pr.mergeable = True
+        mock_pr.update = Mock()
+
+        # Mock merge to throw 405 "Base branch was modified" twice, then succeed
+        exception_data = {"message": "Base branch was modified. Review and try the merge again."}
+        github_exception = GithubException(405, exception_data)
+        mock_pr.merge = Mock(side_effect=[
+            github_exception,
+            github_exception,
+            None  # Success on third attempt
+        ])
+
+        # Should succeed after retries
+        io_layer._attempt_auto_merge(mock_pr, max_retries=5, retry_delay=0)
+
+        # Verify merge was called 3 times
+        assert mock_pr.merge.call_count == 3
+
     def test_auto_merge_other_github_exception_propagates(self, io_layer):
         """Test that non-405 GithubExceptions are propagated immediately."""
         # Create a mock PR
