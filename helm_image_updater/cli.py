@@ -43,6 +43,7 @@ def main():
         print(f"Automerge: {config.automerge}")
         print(f"Dry run: {config.dry_run}")
         print(f"Multi-stage deployment: {config.multi_stage}")
+        print(f"Grouping strategy: {config.grouping_strategy.value}")
         
         # Handle target path change
         if config.target_path != ".":
@@ -56,8 +57,28 @@ def main():
         io_layer = IOLayer(repo, github_repo, config.dry_run)
         
         # Step 4: Prepare plan (reads files, calculates changes)
-        plan = prepare_plan(config, io_layer)
-        
+        # Print strategy info for CLI output
+        if config.override_stack:
+            print(f"Override stack: {config.override_stack}")
+
+        plan = prepare_plan(config, io_layer, os.environ)
+
+        # Print strategy info for CLI output based on determined strategy
+        from .models import UpdateStrategy
+        if plan.strategy == UpdateStrategy.DEV:
+            print("Updating dev stacks (dev- tag)")
+        elif plan.strategy == UpdateStrategy.PRODUCTION:
+            print("Updating all stacks (production- tag)")
+        elif plan.strategy == UpdateStrategy.CANARY:
+            canary_prefix = config.image_tag.split('-')[1] if config.image_tag and '-' in config.image_tag else ""
+            print(f"Detected canary tag, switching to branch 'canary-{canary_prefix}'")
+            print(f"Successfully switched to branch 'canary-{canary_prefix}'")
+            print("Updating canary stack")
+        elif plan.strategy == UpdateStrategy.OVERRIDE:
+            # Check if we have any target stacks
+            if not plan.target_stacks:
+                print(f"No stacks found for strategy {plan.strategy.value}")
+
         # Step 5: Execute plan (writes files, creates PRs)
         result = execute_plan(plan, io_layer)
         
