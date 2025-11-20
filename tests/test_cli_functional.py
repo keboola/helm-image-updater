@@ -1186,3 +1186,92 @@ def test_semver_main_image_tag(cli_test_env, capsys):
     # Verify PR was created
     assert len(created_prs) == 1
     assert "test-chart" in created_prs[0]["title"]
+
+
+def test_canary_tag_in_extra_tag_should_update_canary_stack(cli_test_env, mock_git_operations, capsys):
+    """Test that canary tag in EXTRA_TAG properly updates canary stack.
+
+    When a canary tag is specified in an extra tag (EXTRA_TAG1 or EXTRA_TAG2),
+    the system should:
+    1. Detect it as a canary deployment
+    2. Switch to the canary branch
+    3. Update ONLY the canary stack with the extra tag value
+
+    This test will FAIL initially and pass after the bug is fixed.
+    """
+    base_dir, mock_repo, mock_github_repo = cli_test_env
+
+    # Setup mock repo to track git operations
+    git_calls = []
+
+    def track_git_call(*args, **kwargs):
+        git_calls.append(args)
+        return Mock()
+
+    mock_repo.git.checkout = Mock(side_effect=track_git_call)
+    mock_repo.git.pull = Mock(side_effect=track_git_call)
+    mock_repo.active_branch = Mock()
+    mock_repo.active_branch.name = "canary-orion"  # Simulate being on canary branch after switch
+
+    # Mock create_pr to track PRs created
+    created_prs = []
+
+    def mock_create_branch_commit_and_pr(self, branch_name, files_to_commit, commit_message, pr_title, pr_body, base_branch="main", auto_merge=False):
+        """Mock PR creation to track PR details."""
+        created_prs.append({
+            "branch": branch_name,
+            "title": pr_title,
+            "base": base_branch,
+            "files": files_to_commit
+        })
+        return "https://github.com/mock-org/mock-repo/pull/123"
+
+    # Test scenario: canary tag in EXTRA_TAG1 only (no IMAGE_TAG)
+    os.environ["HELM_CHART"] = "test-chart"
+    os.environ["EXTRA_TAG1"] = "image.tag:canary-orion-xyz789"  # Canary tag in extra tag
+    os.environ["AUTOMERGE"] = "true"
+
+    with patch("helm_image_updater.io_layer.IOLayer.create_branch_commit_and_pr", mock_create_branch_commit_and_pr):
+        cli.main()
+
+    # Check console output
+    captured = capsys.readouterr()
+
+    # ✅ EXPECTED BEHAVIOR: System should detect canary tag in extra tag
+    assert "Detected canary tag, switching to branch 'canary-orion'" in captured.out, \
+        "Should detect canary tag from EXTRA_TAG"
+    assert "Successfully switched to branch 'canary-orion'" in captured.out, \
+        "Should switch to canary branch"
+    assert "Updating canary stack" in captured.out, \
+        "Should update canary stack"
+
+    # ✅ EXPECTED: Canary stack should be updated
+    canary_tag_yaml = read_tag_yaml(
+        base_dir / "dev-keboola-canary-orion" / "test-chart" / "tag.yaml"
+    )
+    assert canary_tag_yaml["image"]["tag"] == "canary-orion-xyz789", \
+        "Canary stack should be updated with canary tag"
+
+    # ✅ EXPECTED: Dev stacks should NOT be updated
+    dev_tag_yaml = read_tag_yaml(
+        base_dir / "dev-keboola-gcp-us-central1" / "test-chart" / "tag.yaml"
+    )
+    assert dev_tag_yaml["image"]["tag"] == "old-tag", \
+        "Dev stacks should not be updated"
+
+    # ✅ EXPECTED: PR should be created against canary branch
+    assert len(created_prs) == 1, "Should create exactly one PR"
+    assert created_prs[0]["base"] == "canary-orion", \
+        "PR should target canary-orion branch"
+
+    # ✅ EXPECTED: Only canary stack should be in PR files
+    pr_files = created_prs[0]["files"]
+    assert any("dev-keboola-canary-orion" in f for f in pr_files), \
+        "Canary stack should be in PR"
+    assert not any("dev-keboola-gcp-us-central1" in f for f in pr_files), \
+        "Dev stacks should not be in PR"
+
+    # ✅ EXPECTED: Git checkout to canary branch should have happened
+    checkout_calls = [call for call in git_calls if "canary-orion" in str(call)]
+    assert len(checkout_calls) >= 1, \
+        "Should checkout canary-orion branch"
