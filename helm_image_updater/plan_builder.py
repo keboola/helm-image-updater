@@ -35,7 +35,8 @@ def prepare_plan(config: EnvironmentConfig, io_layer: IOLayer) -> UpdatePlan:
     elif strategy == UpdateStrategy.PRODUCTION:
         print("Updating all stacks (production- tag)")
     elif strategy == UpdateStrategy.CANARY:
-        canary_prefix = config.image_tag.split('-')[1] if config.image_tag and '-' in config.image_tag else ""
+        canary_tag = _get_canary_tag_value(config)
+        canary_prefix = canary_tag.split('-')[1] if canary_tag and '-' in canary_tag else ""
         print(f"Detected canary tag, switching to branch 'canary-{canary_prefix}'")
         io_layer.switch_branch(f"canary-{canary_prefix}")
         print(f"Successfully switched to branch 'canary-{canary_prefix}'")
@@ -86,21 +87,41 @@ def prepare_plan(config: EnvironmentConfig, io_layer: IOLayer) -> UpdatePlan:
     return plan
 
 
+def _get_canary_tag_value(config: EnvironmentConfig) -> Optional[str]:
+    """
+    Find the canary tag value from either IMAGE_TAG or extra tags.
+
+    Returns:
+        The canary tag value if found, None otherwise
+    """
+    # Check main image tag
+    if config.image_tag and detect_tag_type(config.image_tag) == TagType.CANARY:
+        return config.image_tag
+
+    # Check extra tags
+    for extra_tag in config.extra_tags:
+        tag_value = extra_tag.get("value", "")
+        if detect_tag_type(tag_value) == TagType.CANARY:
+            return tag_value
+
+    return None
+
+
 def _determine_strategy(config: EnvironmentConfig) -> UpdateStrategy:
     """Determine the update strategy."""
     if config.override_stack:
         return UpdateStrategy.OVERRIDE
-    
+
     # Check main tag
     tag_type = detect_tag_type(config.image_tag) if config.image_tag else TagType.INVALID
-    
+
     if tag_type == TagType.DEV:
         return UpdateStrategy.DEV
     elif tag_type in (TagType.PRODUCTION, TagType.SEMVER):
         return UpdateStrategy.PRODUCTION
     elif tag_type == TagType.CANARY:
         return UpdateStrategy.CANARY
-    
+
     # Check extra tags
     for extra_tag in config.extra_tags:
         tag_type = detect_tag_type(extra_tag.get("value", ""))
@@ -108,7 +129,9 @@ def _determine_strategy(config: EnvironmentConfig) -> UpdateStrategy:
             return UpdateStrategy.DEV
         elif tag_type in (TagType.PRODUCTION, TagType.SEMVER):
             return UpdateStrategy.PRODUCTION
-    
+        elif tag_type == TagType.CANARY:
+            return UpdateStrategy.CANARY
+
     return UpdateStrategy.DEV  # Default
 
 
@@ -146,7 +169,8 @@ def _select_target_stacks(
     
     if strategy == UpdateStrategy.CANARY:
         # Find matching canary stack
-        canary_tag_prefix = f"canary-{config.image_tag.split('-')[1]}" if config.image_tag and len(config.image_tag.split('-')) > 1 else ""
+        canary_tag = _get_canary_tag_value(config)
+        canary_tag_prefix = f"canary-{canary_tag.split('-')[1]}" if canary_tag and len(canary_tag.split('-')) > 1 else ""
         for prefix, canary_config in CANARY_STACKS.items():
             if prefix == canary_tag_prefix:
                 stack_name = canary_config["stack"]
@@ -313,7 +337,7 @@ def _group_changes_for_prs(
         return [{
             'stacks': [sc['stack'] for sc in stack_changes],
             'changes': stack_changes,
-            'base_branch': _get_canary_base_branch(plan.image_tag),
+            'base_branch': _get_canary_base_branch(config),
             'pr_type': 'canary'
         }]
     
@@ -475,10 +499,11 @@ def _create_pr_plan(pr_group: Dict[str, Any], plan: UpdatePlan, config: Environm
     )
 
 
-def _get_canary_base_branch(image_tag: str) -> str:
+def _get_canary_base_branch(config: EnvironmentConfig) -> str:
     """Get the base branch for a canary deployment."""
-    if image_tag and image_tag.startswith("canary-"):
-        canary_tag_prefix = f"canary-{image_tag.split('-')[1]}" if len(image_tag.split('-')) > 1 else ""
+    canary_tag = _get_canary_tag_value(config)
+    if canary_tag and canary_tag.startswith("canary-"):
+        canary_tag_prefix = f"canary-{canary_tag.split('-')[1]}" if len(canary_tag.split('-')) > 1 else ""
         for prefix, canary_config in CANARY_STACKS.items():
             if prefix == canary_tag_prefix:
                 return canary_config["base_branch"]
