@@ -78,6 +78,7 @@ def test_plan_with_dry_run(test_stacks):
         "DRY_RUN": "true",  # Dry run to avoid actual Git operations
         "MULTI_STAGE": "false",
         "TARGET_PATH": str(test_stacks["base_dir"]),
+        "GH_APPROVE_TOKEN": "fake-approve-token",
     }
     
     config = EnvironmentConfig.from_env(mock_env)
@@ -86,7 +87,8 @@ def test_plan_with_dry_run(test_stacks):
     # Create mock I/O layer
     mock_repo = Mock()
     mock_github_repo = Mock()
-    io_layer = IOLayer(mock_repo, mock_github_repo, dry_run=True)
+    mock_approve_github_repo = Mock()
+    io_layer = IOLayer(mock_repo, mock_github_repo, dry_run=True, approve_github_repo=mock_approve_github_repo)
     
     # Create plan and verify it can be prepared
     plan = prepare_plan(config, io_layer)

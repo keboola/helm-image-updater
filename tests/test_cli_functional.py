@@ -105,6 +105,7 @@ def cli_test_env(mock_repo, mock_github_repo, tmp_path):
         # Clear environment and set basic variables
         os.environ.clear()
         os.environ["GH_TOKEN"] = "fake-token"
+        os.environ["GH_APPROVE_TOKEN"] = "fake-approve-token"
 
         yield base_dir, mock_repo, mock_github_repo
 
@@ -419,6 +420,7 @@ def test_canary_tag_update(cli_test_env, capsys):
     git_calls.clear()
     os.environ.clear()
     os.environ["GH_TOKEN"] = "fake-token"
+    os.environ["GH_APPROVE_TOKEN"] = "fake-approve-token"
     os.environ["HELM_CHART"] = "metastore"  # Chart that only exists in canary
     os.environ["IMAGE_TAG"] = "canary-orion-metastore-0.0.5"
     os.environ["AUTOMERGE"] = "true"
@@ -638,6 +640,7 @@ def test_valid_extra_tag_formats(cli_test_env, capsys):
     # Run another test with v-prefixed semver
     os.environ.clear()
     os.environ["GH_TOKEN"] = "fake-token"
+    os.environ["GH_APPROVE_TOKEN"] = "fake-approve-token"
     os.environ["HELM_CHART"] = "test-chart"
     os.environ["IMAGE_TAG"] = "production-1.2.3"
     os.environ["EXTRA_TAG1"] = "path1:v1.2.3"  # Semver format with v prefix
@@ -1156,6 +1159,7 @@ def test_semver_main_image_tag(cli_test_env, capsys):
     # Test with v-prefixed semver
     os.environ.clear()
     os.environ["GH_TOKEN"] = "fake-token"
+    os.environ["GH_APPROVE_TOKEN"] = "fake-approve-token"
     os.environ["HELM_CHART"] = "test-chart"
     os.environ["IMAGE_TAG"] = "v2.3.4"  # Semver with v prefix
 

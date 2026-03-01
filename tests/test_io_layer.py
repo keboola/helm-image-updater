@@ -24,9 +24,14 @@ class TestAutoMerge:
         return Mock()
 
     @pytest.fixture
-    def io_layer(self, mock_repo, mock_github_repo):
+    def mock_approve_github_repo(self):
+        """Create a mock GitHub repository for approval."""
+        return Mock()
+
+    @pytest.fixture
+    def io_layer(self, mock_repo, mock_github_repo, mock_approve_github_repo):
         """Create an IOLayer instance with mocked dependencies."""
-        return IOLayer(mock_repo, mock_github_repo, dry_run=False)
+        return IOLayer(mock_repo, mock_github_repo, dry_run=False, approve_github_repo=mock_approve_github_repo)
 
     def test_auto_merge_timeout_raises_exception(self, io_layer):
         """Test that auto-merge raises AutoMergeError when PR mergeable status remains None."""
@@ -276,30 +281,6 @@ class TestAutoApprove:
 
         # Verify approval was NOT requested
         mock_approve_github_repo.get_pull.assert_not_called()
-
-    def test_auto_approve_not_called_when_approve_repo_is_none(
-        self, mock_repo, mock_github_repo
-    ):
-        """Test that PR is NOT auto-approved when approve_github_repo is None."""
-        io_layer = IOLayer(mock_repo, mock_github_repo, dry_run=False, approve_github_repo=None)
-
-        # Setup mock PR creation
-        mock_pr = MagicMock()
-        mock_pr.html_url = "https://github.com/test/repo/pull/3"
-        mock_pr.number = 3
-        mock_github_repo.create_pull.return_value = mock_pr
-
-        with patch.object(io_layer, 'push_branch', return_value=True):
-            io_layer.create_pull_request(
-                title="Test PR",
-                body="Test body",
-                branch_name="test-branch",
-                base_branch="main",
-                auto_merge=False
-            )
-
-        # No approve repo, so no approval call possible - just verify PR was created
-        mock_github_repo.create_pull.assert_called_once()
 
     def test_auto_approve_failure_does_not_crash(
         self, mock_repo, mock_github_repo, mock_approve_github_repo

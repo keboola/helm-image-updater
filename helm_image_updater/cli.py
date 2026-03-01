@@ -54,10 +54,8 @@ def main():
         github_client = Github(config.github_token)
         github_repo = github_client.get_repo(GITHUB_REPO)
 
-        approve_github_repo = None
-        if config.approve_token:
-            approve_client = Github(config.approve_token)
-            approve_github_repo = approve_client.get_repo(GITHUB_REPO)
+        approve_client = Github(config.approve_token)
+        approve_github_repo = approve_client.get_repo(GITHUB_REPO)
 
         io_layer = IOLayer(repo, github_repo, config.dry_run, approve_github_repo=approve_github_repo)
         

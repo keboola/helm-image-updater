@@ -23,7 +23,7 @@ from .exceptions import AutoMergeError
 class IOLayer:
     """Handles all I/O operations for the application."""
     
-    def __init__(self, repo: Repo, github_repo: Any, dry_run: bool = False, approve_github_repo: Any = None):
+    def __init__(self, repo: Repo, github_repo: Any, dry_run: bool = False, *, approve_github_repo: Any):
         """Initialize the I/O layer.
 
         Args:
@@ -356,9 +356,6 @@ class IOLayer:
         Args:
             pr: GitHub PR object
         """
-        if not self.approve_github_repo:
-            return
-
         try:
             approve_pr = self.approve_github_repo.get_pull(pr.number)
             approve_pr.create_review(event="APPROVE")
