@@ -12,7 +12,7 @@ import pytest
 import yaml
 from helm_image_updater.io_layer import IOLayer
 from helm_image_updater.environment import EnvironmentConfig
-from helm_image_updater.plan_builder import prepare_plan, _group_changes_for_prs
+from helm_image_updater.plan_builder import prepare_plan, _group_changes_for_prs, _check_and_remove_override
 from helm_image_updater.models import UpdatePlan, UpdateStrategy
 from unittest.mock import Mock
 
@@ -313,3 +313,203 @@ def test_multi_cloud_grouping_dev_strategy(test_stacks):
     # Verify the group contains all dev stacks
     assert len(groups[0]['stacks']) == 3, f"Group should contain all 3 dev stacks"
     assert groups[0]['pr_type'] == 'standard', f"PR type should be 'standard'"
+
+
+# Override removal tests
+
+class TestCheckAndRemoveOverride:
+    """Tests for _check_and_remove_override function."""
+
+    def test_removes_override_with_branch(self):
+        """Override with a feature branch name is removed."""
+        mock_io = Mock()
+        mock_io.read_file.return_value = yaml.dump({
+            "argocdApplication": {"appManifestsRevision": "feature-branch-123"}
+        })
+
+        result = _check_and_remove_override("dev-stack", "my-chart", mock_io)
+
+        assert result is not None
+        assert result.file_path == "dev-stack/my-chart/values.yaml"
+        assert "feature-branch-123" in result.change_description
+
+        new_data = yaml.safe_load(result.new_content)
+        # argocdApplication block should be completely removed (it was the only key)
+        assert new_data is None or "argocdApplication" not in (new_data or {})
+
+    def test_no_values_yaml(self):
+        """Returns None when values.yaml doesn't exist."""
+        mock_io = Mock()
+        mock_io.read_file.return_value = None
+
+        result = _check_and_remove_override("dev-stack", "my-chart", mock_io)
+        assert result is None
+
+    def test_no_override_key(self):
+        """Returns None when argocdApplication is not present."""
+        mock_io = Mock()
+        mock_io.read_file.return_value = yaml.dump({
+            "image": {"repository": "keboola/my-service"}
+        })
+
+        result = _check_and_remove_override("dev-stack", "my-chart", mock_io)
+        assert result is None
+
+    def test_override_set_to_main(self):
+        """Returns None when override is set to 'main' (already correct)."""
+        mock_io = Mock()
+        mock_io.read_file.return_value = yaml.dump({
+            "argocdApplication": {"appManifestsRevision": "main"}
+        })
+
+        result = _check_and_remove_override("dev-stack", "my-chart", mock_io)
+        assert result is None
+
+    def test_preserves_other_argocd_fields(self):
+        """Only removes appManifestsRevision, keeps other argocdApplication fields."""
+        mock_io = Mock()
+        mock_io.read_file.return_value = yaml.dump({
+            "argocdApplication": {
+                "appManifestsRevision": "feature-branch",
+                "syncPolicy": "automated",
+            }
+        })
+
+        result = _check_and_remove_override("dev-stack", "my-chart", mock_io)
+
+        assert result is not None
+        new_data = yaml.safe_load(result.new_content)
+        assert "argocdApplication" in new_data
+        assert "appManifestsRevision" not in new_data["argocdApplication"]
+        assert new_data["argocdApplication"]["syncPolicy"] == "automated"
+
+    def test_preserves_other_top_level_keys(self):
+        """Other top-level keys in values.yaml are preserved."""
+        mock_io = Mock()
+        mock_io.read_file.return_value = yaml.dump({
+            "image": {"repository": "keboola/my-service"},
+            "argocdApplication": {"appManifestsRevision": "feature-branch"},
+            "resources": {"limits": {"cpu": "100m"}},
+        })
+
+        result = _check_and_remove_override("dev-stack", "my-chart", mock_io)
+
+        assert result is not None
+        new_data = yaml.safe_load(result.new_content)
+        assert new_data["image"]["repository"] == "keboola/my-service"
+        assert new_data["resources"]["limits"]["cpu"] == "100m"
+        assert "argocdApplication" not in new_data
+
+    def test_empty_argocd_block_no_revision(self):
+        """Returns None when argocdApplication exists but has no appManifestsRevision."""
+        mock_io = Mock()
+        mock_io.read_file.return_value = yaml.dump({
+            "argocdApplication": {"syncPolicy": "automated"}
+        })
+
+        result = _check_and_remove_override("dev-stack", "my-chart", mock_io)
+        assert result is None
+
+    def test_invalid_yaml(self):
+        """Returns None when values.yaml contains invalid YAML."""
+        mock_io = Mock()
+        mock_io.read_file.return_value = "{{invalid yaml: ["
+
+        result = _check_and_remove_override("dev-stack", "my-chart", mock_io)
+        assert result is None
+
+    def test_values_yaml_is_just_a_string(self):
+        """Returns None when values.yaml parses to a non-dict (e.g. a plain string)."""
+        mock_io = Mock()
+        mock_io.read_file.return_value = "just a string"
+
+        result = _check_and_remove_override("dev-stack", "my-chart", mock_io)
+        assert result is None
+
+
+class TestOverrideIntegration:
+    """Integration tests for override removal in the full plan flow."""
+
+    def test_plan_includes_override_removal(self, tmp_path):
+        """prepare_plan includes override FileChange when values.yaml has an override."""
+        # Set up a dev stack with tag.yaml and values.yaml with override
+        stack_name = "dev-keboola-gcp-us-central1"
+        stack_dir = tmp_path / stack_name
+        chart_dir = stack_dir / "test-chart"
+        chart_dir.mkdir(parents=True)
+
+        # Create tag.yaml
+        create_tag_yaml(chart_dir / "tag.yaml", "old-tag")
+
+        # Create values.yaml with override
+        with open(chart_dir / "values.yaml", "w") as f:
+            yaml.dump({"argocdApplication": {"appManifestsRevision": "feature-branch"}}, f)
+
+        # Create shared-values.yaml
+        with open(stack_dir / "shared-values.yaml", "w") as f:
+            yaml.dump({"cloudProvider": "gcp"}, f)
+
+        os.chdir(tmp_path)
+
+        mock_env = {
+            "HELM_CHART": "test-chart",
+            "IMAGE_TAG": "dev-new-tag",
+            "GH_TOKEN": "fake-token",
+            "AUTOMERGE": "true",
+            "DRY_RUN": "true",
+            "MULTI_STAGE": "false",
+            "TARGET_PATH": str(tmp_path),
+        }
+
+        config = EnvironmentConfig.from_env(mock_env)
+        mock_repo = Mock()
+        mock_github_repo = Mock()
+        io_layer = IOLayer(mock_repo, mock_github_repo, dry_run=True)
+
+        plan = prepare_plan(config, io_layer)
+
+        # Should have 2 file changes: tag.yaml + values.yaml
+        assert len(plan.file_changes) == 2
+        file_paths = [fc.file_path for fc in plan.file_changes]
+        assert f"{stack_name}/test-chart/tag.yaml" in file_paths
+        assert f"{stack_name}/test-chart/values.yaml" in file_paths
+
+        # PR should include both files
+        assert len(plan.pr_plans) == 1
+        assert f"{stack_name}/test-chart/values.yaml" in plan.pr_plans[0].files_to_commit
+
+    def test_plan_without_override_has_only_tag_change(self, tmp_path):
+        """prepare_plan only has tag.yaml change when no override exists."""
+        stack_name = "dev-keboola-gcp-us-central1"
+        stack_dir = tmp_path / stack_name
+        chart_dir = stack_dir / "test-chart"
+        chart_dir.mkdir(parents=True)
+
+        create_tag_yaml(chart_dir / "tag.yaml", "old-tag")
+
+        # Create shared-values.yaml
+        with open(stack_dir / "shared-values.yaml", "w") as f:
+            yaml.dump({"cloudProvider": "gcp"}, f)
+
+        os.chdir(tmp_path)
+
+        mock_env = {
+            "HELM_CHART": "test-chart",
+            "IMAGE_TAG": "dev-new-tag",
+            "GH_TOKEN": "fake-token",
+            "AUTOMERGE": "true",
+            "DRY_RUN": "true",
+            "MULTI_STAGE": "false",
+            "TARGET_PATH": str(tmp_path),
+        }
+
+        config = EnvironmentConfig.from_env(mock_env)
+        mock_repo = Mock()
+        mock_github_repo = Mock()
+        io_layer = IOLayer(mock_repo, mock_github_repo, dry_run=True)
+
+        plan = prepare_plan(config, io_layer)
+
+        # Should have only 1 file change: tag.yaml
+        assert len(plan.file_changes) == 1
+        assert plan.file_changes[0].file_path == f"{stack_name}/test-chart/tag.yaml"
