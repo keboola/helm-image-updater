@@ -1,4 +1,4 @@
-"""Unit tests for IOLayer auto-merge functionality."""
+"""Unit tests for IOLayer auto-merge and auto-approve functionality."""
 
 import pytest
 from unittest.mock import Mock, MagicMock, patch
@@ -201,3 +201,148 @@ class TestAutoMerge:
 
         # Verify PR was created before merge failed
         mock_github_repo.create_pull.assert_called_once()
+
+
+class TestAutoApprove:
+    """Test auto-approve functionality in IOLayer."""
+
+    @pytest.fixture
+    def mock_repo(self):
+        """Create a mock Git repository."""
+        repo = Mock()
+        repo.git = Mock()
+        return repo
+
+    @pytest.fixture
+    def mock_github_repo(self):
+        """Create a mock GitHub repository."""
+        return Mock()
+
+    @pytest.fixture
+    def mock_approve_github_repo(self):
+        """Create a mock GitHub repository for approval."""
+        return Mock()
+
+    def test_auto_approve_called_when_no_auto_merge_and_approve_repo_set(
+        self, mock_repo, mock_github_repo, mock_approve_github_repo
+    ):
+        """Test that PR is auto-approved when auto_merge=False and approve_github_repo is set."""
+        io_layer = IOLayer(mock_repo, mock_github_repo, dry_run=False, approve_github_repo=mock_approve_github_repo)
+
+        # Setup mock PR creation
+        mock_pr = MagicMock()
+        mock_pr.html_url = "https://github.com/test/repo/pull/1"
+        mock_pr.number = 1
+        mock_github_repo.create_pull.return_value = mock_pr
+
+        # Setup mock approve PR
+        mock_approve_pr = MagicMock()
+        mock_approve_github_repo.get_pull.return_value = mock_approve_pr
+
+        with patch.object(io_layer, 'push_branch', return_value=True):
+            io_layer.create_pull_request(
+                title="Test PR",
+                body="Test body",
+                branch_name="test-branch",
+                base_branch="main",
+                auto_merge=False
+            )
+
+        # Verify approval was requested
+        mock_approve_github_repo.get_pull.assert_called_once_with(1)
+        mock_approve_pr.create_review.assert_called_once_with(event="APPROVE")
+
+    def test_auto_approve_not_called_when_auto_merge_true(
+        self, mock_repo, mock_github_repo, mock_approve_github_repo
+    ):
+        """Test that PR is NOT auto-approved when auto_merge=True."""
+        io_layer = IOLayer(mock_repo, mock_github_repo, dry_run=False, approve_github_repo=mock_approve_github_repo)
+
+        # Setup mock PR creation
+        mock_pr = MagicMock()
+        mock_pr.html_url = "https://github.com/test/repo/pull/2"
+        mock_pr.number = 2
+        mock_pr.mergeable = True
+        mock_github_repo.create_pull.return_value = mock_pr
+
+        with patch.object(io_layer, 'push_branch', return_value=True):
+            io_layer.create_pull_request(
+                title="Test PR",
+                body="Test body",
+                branch_name="test-branch",
+                base_branch="main",
+                auto_merge=True
+            )
+
+        # Verify approval was NOT requested
+        mock_approve_github_repo.get_pull.assert_not_called()
+
+    def test_auto_approve_not_called_when_approve_repo_is_none(
+        self, mock_repo, mock_github_repo
+    ):
+        """Test that PR is NOT auto-approved when approve_github_repo is None."""
+        io_layer = IOLayer(mock_repo, mock_github_repo, dry_run=False, approve_github_repo=None)
+
+        # Setup mock PR creation
+        mock_pr = MagicMock()
+        mock_pr.html_url = "https://github.com/test/repo/pull/3"
+        mock_pr.number = 3
+        mock_github_repo.create_pull.return_value = mock_pr
+
+        with patch.object(io_layer, 'push_branch', return_value=True):
+            io_layer.create_pull_request(
+                title="Test PR",
+                body="Test body",
+                branch_name="test-branch",
+                base_branch="main",
+                auto_merge=False
+            )
+
+        # No approve repo, so no approval call possible - just verify PR was created
+        mock_github_repo.create_pull.assert_called_once()
+
+    def test_auto_approve_failure_does_not_crash(
+        self, mock_repo, mock_github_repo, mock_approve_github_repo
+    ):
+        """Test that approval failure doesn't crash the run - PR is still created."""
+        io_layer = IOLayer(mock_repo, mock_github_repo, dry_run=False, approve_github_repo=mock_approve_github_repo)
+
+        # Setup mock PR creation
+        mock_pr = MagicMock()
+        mock_pr.html_url = "https://github.com/test/repo/pull/4"
+        mock_pr.number = 4
+        mock_github_repo.create_pull.return_value = mock_pr
+
+        # Setup approve to fail
+        mock_approve_github_repo.get_pull.side_effect = GithubException(403, {"message": "Forbidden"})
+
+        with patch.object(io_layer, 'push_branch', return_value=True):
+            result = io_layer.create_pull_request(
+                title="Test PR",
+                body="Test body",
+                branch_name="test-branch",
+                base_branch="main",
+                auto_merge=False
+            )
+
+        # PR should still be created and URL returned despite approval failure
+        assert result == "https://github.com/test/repo/pull/4"
+        mock_approve_github_repo.get_pull.assert_called_once_with(4)
+
+    def test_auto_approve_not_called_in_dry_run(
+        self, mock_repo, mock_github_repo, mock_approve_github_repo
+    ):
+        """Test that auto-approve is not called during dry run."""
+        io_layer = IOLayer(mock_repo, mock_github_repo, dry_run=True, approve_github_repo=mock_approve_github_repo)
+
+        result = io_layer.create_pull_request(
+            title="Test PR",
+            body="Test body",
+            branch_name="test-branch",
+            base_branch="main",
+            auto_merge=False
+        )
+
+        # Dry run returns None, no GitHub calls made
+        assert result is None
+        mock_approve_github_repo.get_pull.assert_not_called()

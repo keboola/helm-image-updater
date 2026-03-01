@@ -22,6 +22,7 @@ class EnvironmentConfig:
     target_path: str = "."
     commit_sha: bool = False
     override_stack: str = ""
+    approve_token: Optional[str] = None
     extra_tags: List[Dict[str, str]] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
     _extra_tag_errors: List[int] = field(default_factory=list, init=False, repr=False)
@@ -69,6 +70,7 @@ class EnvironmentConfig:
             target_path=env.get("TARGET_PATH", "."),
             commit_sha=env.get("COMMIT_PIPELINE_SHA", "false").lower() == "true",
             override_stack=env.get("OVERRIDE_STACK", "").strip(),
+            approve_token=env.get("GH_APPROVE_TOKEN", "").strip() or None,
             extra_tags=extra_tags,
             metadata=metadata
         )
