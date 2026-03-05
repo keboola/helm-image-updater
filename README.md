@@ -46,11 +46,12 @@ Required:
 
 - `HELM_CHART`: Name of the Helm chart to update
 - `GH_TOKEN`: GitHub access token for authentication
+- `GH_APPROVE_TOKEN`: GitHub token for the machine user `keboola-sre-approve-bot` used to auto-approve PRs (required). This bot is an alias to the SRE team, with credentials stored in 1Password Ultra vault. The user is added as an external collaborator with permissions to `kbc-stacks` and `helm-image-updater-testing` repositories for PR approvals.
 - `IMAGE_TAG`: New image tag to set (must start with 'dev-', 'production-', or 'canary-orion-')
 
 Optional:
 
-- `AUTOMERGE`: Whether to automatically merge PRs (default: "true", note: canary updates are always auto-merged)
+- `AUTOMERGE`: Whether to automatically merge PRs (default: "true", note: canary updates are always auto-merged). When set to `false`, PRs are auto-approved by the machine user instead, satisfying CODEOWNERS requirements so humans can merge without waiting for additional reviews.
 - `DRY_RUN`: Whether to perform a dry run (default: "false")
 - `MULTI_STAGE`: Enable multi-stage deployment (default: "false")
 - `TARGET_PATH`: Path to the directory containing the stacks (default: ".")
@@ -90,6 +91,7 @@ Minimal usage example:
     override-stack: "dev-keboola-gcp-us-central1"
     extra-tag1: "agent.image.tag:dev-2.0.0"
     extra-tag2: "messenger.image.tag:dev-2.0.0"
+    approve-token: ${{ secrets.SRE_APPROVE_BOT_TOKEN }}
 ```
 
 Full example:
@@ -181,6 +183,7 @@ jobs:
           extra-tag2: ${{ inputs.extra-tag2 }}
           metadata: ${{ inputs.metadata }}
           github-token: ${{ steps.app-token.outputs.token }}
+          approve-token: ${{ secrets.SRE_APPROVE_BOT_TOKEN }}
 
 ## Tag Format
 
@@ -215,6 +218,10 @@ Image tags must follow these formats:
 - Always auto-merges regardless of the `automerge` setting
 - Uses stack-specific base branches (e.g., `canary-orion`)
 - Supports extra tags for complex configurations
+
+## Auto-Approve
+
+When `AUTOMERGE` is set to `false`, created PRs are automatically approved using the `GH_APPROVE_TOKEN` (machine user `keboola-sre-approve-bot`). This satisfies CODEOWNERS approval requirements so that humans can merge PRs without waiting for additional reviews. Auto-approve is skipped when `AUTOMERGE=true` (since PRs are merged immediately) and during dry runs.
 
 ## Multi-Stage Deployment
 
