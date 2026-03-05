@@ -46,7 +46,7 @@ Required:
 
 - `HELM_CHART`: Name of the Helm chart to update
 - `GH_TOKEN`: GitHub access token for authentication
-- `GH_APPROVE_TOKEN`: GitHub token for the machine user `keboola-sre-approve-bot` used to auto-approve PRs (required). This bot is an alias to the SRE team, with credentials stored in 1Password Ultra vault. The user is added as an external collaborator with permissions to `kbc-stacks` and `helm-image-updater-testing` repositories for PR approvals.
+- `GH_APPROVE_TOKEN`: Fine-grained GitHub PAT for the machine user `keboola-sre-approve-bot` used to auto-approve PRs (required). The token requires **Write** permission on **Pull Requests** for the managed repositories (`kbc-stacks`, `helm-image-updater-testing`). Credentials are stored in 1Password Ultra vault.
 - `IMAGE_TAG`: New image tag to set (must start with 'dev-', 'production-', or 'canary-orion-')
 
 Optional:
