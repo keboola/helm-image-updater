@@ -7,3 +7,11 @@ class AutoMergeError(Exception):
     def __init__(self, message: str, pr_url: str = None):
         self.pr_url = pr_url
         super().__init__(message)
+
+
+class AutoApproveError(Exception):
+    """Raised when automatic PR approval fails."""
+
+    def __init__(self, message: str, pr_url: str = None):
+        self.pr_url = pr_url
+        super().__init__(message)
