@@ -152,18 +152,20 @@ def generate_pr_title(
 def format_pr_body_with_metadata(
     helm_chart: str,
     image_tag: str,
-    metadata: Dict[str, Any]
+    metadata: Dict[str, Any],
+    removed_overrides: Optional[List[Dict[str, str]]] = None,
 ) -> str:
     """
     Generate PR body when pipeline metadata is available.
-    
+
     Pure function that formats PR body with metadata.
-    
+
     Args:
         helm_chart: Name of the Helm chart
         image_tag: The image tag
         metadata: Pipeline trigger metadata
-        
+        removed_overrides: Optional list of dicts with 'stack' and 'description' keys
+
     Returns:
         Formatted PR body string
     """
@@ -201,10 +203,23 @@ def format_pr_body_with_metadata(
         f"- [🐕 Datadog](https://app.datadoghq.eu/ci/deployments?search=%40deployment.service%3A{helm_chart})"
     )
     
+    override_section = ""
+    if removed_overrides:
+        override_lines = "\n".join(
+            f"- **{o['stack']}**: {o['description']}" for o in removed_overrides
+        )
+        override_section = (
+            f"\n\n### ⚠️ Removed Branch Overrides\n"
+            f"The following stacks had `argocdApplication.appManifestsRevision` overrides that were removed "
+            f"so ArgoCD will deploy from `main` with the latest tag:\n"
+            f"{override_lines}"
+        )
+
     return (
         f"## 🤖 Automated Image Tag Update\n\n"
         f"{trigger_info}\n\n"
-        f"{change_summary}\n\n"
+        f"{change_summary}"
+        f"{override_section}\n\n"
         f"{monitoring_links}"
     )
 
