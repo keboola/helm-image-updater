@@ -17,7 +17,7 @@ from github import Github
 from github.GithubException import GithubException
 from time import sleep
 
-from .exceptions import AutoMergeError
+from .exceptions import AutoMergeError, AutoApproveError
 
 
 class IOLayer:
@@ -347,7 +347,7 @@ class IOLayer:
                 else:
                     raise
     
-    def _auto_approve_pr(self, pr):
+    def _auto_approve_pr(self, pr, max_retries: int = 5, retry_delay: int = 2):
         """Auto-approve a PR using a CODEOWNERS team member's token.
 
         This satisfies CODEOWNERS approval requirements so that humans
@@ -355,13 +355,27 @@ class IOLayer:
 
         Args:
             pr: GitHub PR object
+            max_retries: Maximum number of retry attempts for transient errors
+            retry_delay: Base delay in seconds between retries (exponential backoff)
+
+        Raises:
+            AutoApproveError: If the PR cannot be auto-approved after retries or due to GitHub API errors.
         """
-        try:
-            approve_pr = self.approve_github_repo.get_pull(pr.number)
-            approve_pr.create_review(event="APPROVE")
-            print(f"✅ PR auto-approved: {pr.html_url}")
-        except GithubException as e:
-            print(f"⚠️ Failed to auto-approve PR: {e}")
+        for attempt in range(max_retries):
+            try:
+                approve_pr = self.approve_github_repo.get_pull(pr.number)
+                approve_pr.create_review(event="APPROVE")
+                print(f"✅ PR auto-approved: {pr.html_url}")
+                return
+            except GithubException as e:
+                if e.status == 404 and attempt < max_retries - 1:
+                    print(f"PR not yet available for approval (404), retrying... (attempt {attempt + 1}/{max_retries})")
+                    sleep(retry_delay * (2 ** attempt))
+                else:
+                    raise AutoApproveError(
+                        f"Failed to auto-approve PR after {attempt + 1} attempt(s): {e}",
+                        pr_url=pr.html_url
+                    )
 
     # -----------------------------------------------------------------------------
     # High-Level Combined Operations

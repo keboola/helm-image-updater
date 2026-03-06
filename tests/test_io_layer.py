@@ -5,7 +5,7 @@ from unittest.mock import Mock, MagicMock, patch
 from github.GithubException import GithubException
 
 from helm_image_updater.io_layer import IOLayer
-from helm_image_updater.exceptions import AutoMergeError
+from helm_image_updater.exceptions import AutoMergeError, AutoApproveError
 
 
 class TestAutoMerge:
@@ -282,10 +282,10 @@ class TestAutoApprove:
         # Verify approval was NOT requested
         mock_approve_github_repo.get_pull.assert_not_called()
 
-    def test_auto_approve_failure_does_not_crash(
+    def test_auto_approve_failure_raises_error(
         self, mock_repo, mock_github_repo, mock_approve_github_repo
     ):
-        """Test that approval failure doesn't crash the run - PR is still created."""
+        """Test that approval failure raises AutoApproveError."""
         io_layer = IOLayer(mock_repo, mock_github_repo, dry_run=False, approve_github_repo=mock_approve_github_repo)
 
         # Setup mock PR creation
@@ -294,21 +294,78 @@ class TestAutoApprove:
         mock_pr.number = 4
         mock_github_repo.create_pull.return_value = mock_pr
 
-        # Setup approve to fail
+        # Setup approve to fail with non-404 error
         mock_approve_github_repo.get_pull.side_effect = GithubException(403, {"message": "Forbidden"})
 
         with patch.object(io_layer, 'push_branch', return_value=True):
-            result = io_layer.create_pull_request(
-                title="Test PR",
-                body="Test body",
-                branch_name="test-branch",
-                base_branch="main",
-                auto_merge=False
-            )
+            with pytest.raises(AutoApproveError):
+                io_layer.create_pull_request(
+                    title="Test PR",
+                    body="Test body",
+                    branch_name="test-branch",
+                    base_branch="main",
+                    auto_merge=False
+                )
 
-        # PR should still be created and URL returned despite approval failure
-        assert result == "https://github.com/test/repo/pull/4"
         mock_approve_github_repo.get_pull.assert_called_once_with(4)
+
+    def test_auto_approve_retries_on_404_then_succeeds(
+        self, mock_repo, mock_github_repo, mock_approve_github_repo
+    ):
+        """Test that 404 on first attempt is retried and succeeds on second."""
+        io_layer = IOLayer(mock_repo, mock_github_repo, dry_run=False, approve_github_repo=mock_approve_github_repo)
+
+        mock_pr = MagicMock()
+        mock_pr.html_url = "https://github.com/test/repo/pull/5"
+        mock_pr.number = 5
+
+        mock_approve_pr = MagicMock()
+        # First call raises 404, second call succeeds
+        mock_approve_github_repo.get_pull.side_effect = [
+            GithubException(404, {"message": "Not Found"}),
+            mock_approve_pr,
+        ]
+
+        with patch('helm_image_updater.io_layer.sleep'):
+            io_layer._auto_approve_pr(mock_pr)
+
+        assert mock_approve_github_repo.get_pull.call_count == 2
+        mock_approve_pr.create_review.assert_called_once_with(event="APPROVE")
+
+    def test_auto_approve_retries_on_404_exhausted(
+        self, mock_repo, mock_github_repo, mock_approve_github_repo
+    ):
+        """Test that repeated 404s exhaust retries and raise AutoApproveError."""
+        io_layer = IOLayer(mock_repo, mock_github_repo, dry_run=False, approve_github_repo=mock_approve_github_repo)
+
+        mock_pr = MagicMock()
+        mock_pr.html_url = "https://github.com/test/repo/pull/6"
+        mock_pr.number = 6
+
+        mock_approve_github_repo.get_pull.side_effect = GithubException(404, {"message": "Not Found"})
+
+        with patch('helm_image_updater.io_layer.sleep'):
+            with pytest.raises(AutoApproveError, match="Failed to auto-approve PR after 5 attempt"):
+                io_layer._auto_approve_pr(mock_pr)
+
+        assert mock_approve_github_repo.get_pull.call_count == 5
+
+    def test_auto_approve_non_404_fails_immediately(
+        self, mock_repo, mock_github_repo, mock_approve_github_repo
+    ):
+        """Test that non-404 error (e.g. 403) raises AutoApproveError on first attempt without retry."""
+        io_layer = IOLayer(mock_repo, mock_github_repo, dry_run=False, approve_github_repo=mock_approve_github_repo)
+
+        mock_pr = MagicMock()
+        mock_pr.html_url = "https://github.com/test/repo/pull/7"
+        mock_pr.number = 7
+
+        mock_approve_github_repo.get_pull.side_effect = GithubException(403, {"message": "Forbidden"})
+
+        with pytest.raises(AutoApproveError, match="Failed to auto-approve PR after 1 attempt"):
+            io_layer._auto_approve_pr(mock_pr)
+
+        mock_approve_github_repo.get_pull.assert_called_once_with(7)
 
     def test_auto_approve_not_called_in_dry_run(
         self, mock_repo, mock_github_repo, mock_approve_github_repo
