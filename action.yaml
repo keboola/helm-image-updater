@@ -39,6 +39,9 @@ inputs:
     description: 'Base64 encoded JSON with trigger metadata'
     required: false
     default: ''
+  approve-token:
+    description: 'GitHub token from a machine user (CODEOWNERS team member) to auto-approve PRs when automerge is false'
+    required: true
   github-token:
     description: 'GitHub token for authentication'
     required: true
@@ -90,6 +93,7 @@ runs:
         OVERRIDE_STACK: ${{ inputs.override-stack }}        
         METADATA: ${{ inputs.metadata }}
         GH_TOKEN: ${{ inputs.github-token }}
+        GH_APPROVE_TOKEN: ${{ inputs.approve-token }}
         COMMIT_PIPELINE_SHA: ${{ inputs.commit-sha }}
       run: |
         pip install helm_image_updater-*.tar.gz
