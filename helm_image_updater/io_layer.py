@@ -357,6 +357,9 @@ class IOLayer:
             pr: GitHub PR object
             max_retries: Maximum number of retry attempts for transient errors
             retry_delay: Base delay in seconds between retries (exponential backoff)
+
+        Raises:
+            AutoApproveError: If the PR cannot be auto-approved after retries or due to GitHub API errors.
         """
         for attempt in range(max_retries):
             try:
