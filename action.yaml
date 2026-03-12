@@ -55,11 +55,11 @@ runs:
         GITHUB_CONTEXT: ${{ toJson(github) }}
       run: echo "$GITHUB_CONTEXT" > github_context.json
 
-    - uses: actions/setup-python@v6
+    - uses: actions/setup-python@v5.2.0
       with:
         python-version: '3.13'
 
-    - uses: robinraju/release-downloader@v1
+    - uses: robinraju/release-downloader@v1.9
       with:
         repository: "keboola/helm-image-updater"
         latest: true
