@@ -54,6 +54,28 @@ jobs:
           comment_mode: off
           files: junit/test-results.xml
 
+  test-action-yaml:
+    name: Test action.yaml release download
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - uses: robinraju/release-downloader@v1.12
+        with:
+          repository: "keboola/helm-image-updater"
+          latest: true
+          fileName: "*.tar.gz"
+
+      - name: Verify download and install
+        run: |
+          echo "Downloaded files:"
+          ls -la helm_image_updater-*.tar.gz
+          pip install helm_image_updater-*.tar.gz
+          which helm-image-updater
+          echo "action.yaml release download verified successfully"
+
   build-and-publish-package:
     needs: test
     if: startsWith(github.ref, 'refs/tags/v')
