@@ -337,6 +337,18 @@ class TestCheckAndRemoveOverride:
         # argocdApplication block should be completely removed (it was the only key)
         assert new_data is None or "argocdApplication" not in (new_data or {})
 
+    def test_removes_override_leaves_empty_file_when_only_override_present(self):
+        """When values.yaml contains only the argocdApplication block, result is an empty file."""
+        mock_io = Mock()
+        mock_io.read_file.return_value = yaml.dump({
+            "argocdApplication": {"appManifestsRevision": "feature-branch-123"}
+        })
+
+        result = _check_and_remove_override("dev-stack", "my-chart", mock_io)
+
+        assert result is not None
+        assert result.new_content == ""
+
     def test_no_values_yaml(self):
         """Returns None when values.yaml doesn't exist."""
         mock_io = Mock()

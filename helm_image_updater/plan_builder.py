@@ -285,7 +285,7 @@ def _check_and_remove_override(
     if not new_data["argocdApplication"]:
         del new_data["argocdApplication"]
 
-    new_content = yaml.dump(new_data, default_flow_style=False, sort_keys=False)
+    new_content = yaml.dump(new_data, default_flow_style=False, sort_keys=False) if new_data else ""
 
     print(f"Detected appManifestsRevision override ({revision}) in {values_file_path}, will remove it")
 
