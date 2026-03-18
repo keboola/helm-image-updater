@@ -464,7 +464,7 @@ class TestOverrideIntegration:
         config = EnvironmentConfig.from_env(mock_env)
         mock_repo = Mock()
         mock_github_repo = Mock()
-        io_layer = IOLayer(mock_repo, mock_github_repo, dry_run=True)
+        io_layer = IOLayer(mock_repo, mock_github_repo, dry_run=True, approve_github_repo=Mock())
 
         plan = prepare_plan(config, io_layer)
 
@@ -506,7 +506,7 @@ class TestOverrideIntegration:
         config = EnvironmentConfig.from_env(mock_env)
         mock_repo = Mock()
         mock_github_repo = Mock()
-        io_layer = IOLayer(mock_repo, mock_github_repo, dry_run=True)
+        io_layer = IOLayer(mock_repo, mock_github_repo, dry_run=True, approve_github_repo=Mock())
 
         plan = prepare_plan(config, io_layer)
 
