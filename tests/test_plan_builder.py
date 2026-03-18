@@ -430,7 +430,7 @@ class TestCheckAndRemoveOverride:
 class TestOverrideIntegration:
     """Integration tests for override removal in the full plan flow."""
 
-    def test_plan_includes_override_removal(self, tmp_path):
+    def test_plan_includes_override_removal(self, tmp_path, monkeypatch):
         """prepare_plan includes override FileChange when values.yaml has an override."""
         # Set up a dev stack with tag.yaml and values.yaml with override
         stack_name = "dev-keboola-gcp-us-central1"
@@ -449,7 +449,7 @@ class TestOverrideIntegration:
         with open(stack_dir / "shared-values.yaml", "w") as f:
             yaml.dump({"cloudProvider": "gcp"}, f)
 
-        os.chdir(tmp_path)
+        monkeypatch.chdir(tmp_path)
 
         mock_env = {
             "HELM_CHART": "test-chart",
@@ -478,7 +478,7 @@ class TestOverrideIntegration:
         assert len(plan.pr_plans) == 1
         assert f"{stack_name}/test-chart/values.yaml" in plan.pr_plans[0].files_to_commit
 
-    def test_plan_without_override_has_only_tag_change(self, tmp_path):
+    def test_plan_without_override_has_only_tag_change(self, tmp_path, monkeypatch):
         """prepare_plan only has tag.yaml change when no override exists."""
         stack_name = "dev-keboola-gcp-us-central1"
         stack_dir = tmp_path / stack_name
@@ -491,7 +491,7 @@ class TestOverrideIntegration:
         with open(stack_dir / "shared-values.yaml", "w") as f:
             yaml.dump({"cloudProvider": "gcp"}, f)
 
-        os.chdir(tmp_path)
+        monkeypatch.chdir(tmp_path)
 
         mock_env = {
             "HELM_CHART": "test-chart",

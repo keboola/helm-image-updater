@@ -282,10 +282,6 @@ def _check_and_remove_override(
 
     new_content = yaml.dump(new_data, default_flow_style=False, sort_keys=False)
 
-    # Handle case where removing argocdApplication leaves an empty dict
-    if not new_data:
-        new_content = ""
-
     print(f"Detected appManifestsRevision override ({revision}) in {values_file_path}, will remove it")
 
     return FileChange(
