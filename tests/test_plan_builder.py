@@ -333,9 +333,7 @@ class TestCheckAndRemoveOverride:
         assert result.file_path == "dev-stack/my-chart/values.yaml"
         assert "feature-branch-123" in result.change_description
 
-        new_data = yaml.safe_load(result.new_content)
-        # argocdApplication block should be completely removed (it was the only key)
-        assert new_data is None or "argocdApplication" not in (new_data or {})
+        assert result.new_content == ""
 
     def test_removes_override_leaves_empty_file_when_only_override_present(self):
         """When values.yaml contains only the argocdApplication block, result is an empty file."""
