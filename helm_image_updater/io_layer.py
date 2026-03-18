@@ -110,7 +110,7 @@ class IOLayer:
             return False
         
         for file_change in file_changes:
-            if file_change.file_path.endswith(('.yaml', '.yml')):
+            if file_change.file_path.endswith(('.yaml', '.yml')) and file_change.new_content.strip():
                 # For YAML files, parse and write properly
                 data = yaml.safe_load(file_change.new_content)
                 self.write_yaml(file_change.file_path, data)
