@@ -252,8 +252,12 @@ def _check_and_remove_override(
     Returns a FileChange if an override was found and should be removed, None otherwise.
     """
     values_file_path = f"{stack}/{helm_chart}/values.yaml"
-    values_content = io_layer.read_file(values_file_path)
-    if values_content is None:
+    try:
+        values_content = io_layer.read_file(values_file_path)
+        if values_content is None:
+            return None
+    except Exception:
+        print(f"Warning: could not read {values_file_path}, skipping override check")
         return None
 
     try:
