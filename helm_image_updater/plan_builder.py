@@ -256,13 +256,14 @@ def _check_and_remove_override(
         values_content = io_layer.read_file(values_file_path)
         if values_content is None:
             return None
-    except Exception:
-        print(f"Warning: could not read {values_file_path}, skipping override check")
+    except Exception as e:
+        print(f"Warning: could not read {values_file_path}, skipping override check: {e}")
         return None
 
     try:
         values_data = yaml.safe_load(values_content)
-    except Exception:
+    except yaml.YAMLError as e:
+        print(f"Warning: could not parse {values_file_path}, skipping override check: {e}")
         return None
 
     if not isinstance(values_data, dict):
