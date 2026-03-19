@@ -75,6 +75,8 @@ def prepare_plan(config: EnvironmentConfig, io_layer: IOLayer) -> UpdatePlan:
     # Create file changes
     for stack_change in stack_changes:
         plan.file_changes.append(stack_change['file_change'])
+        if 'override_change' in stack_change:
+            plan.file_changes.append(stack_change['override_change'])
     
     # Group changes into PRs
     pr_groups = _group_changes_for_prs(stack_changes, plan, config, io_layer)
@@ -221,19 +223,79 @@ def _calculate_all_changes(plan: UpdatePlan, io_layer: IOLayer) -> List[Dict[str
                 f"{change.path} from {change.old_value} to {change.new_value}"
             )
         
-        stack_changes.append({
+        stack_change = {
             'stack': stack,
             'file_change': FileChange(
                 file_path=tag_file_path,
                 old_content=current_content,
                 new_content=new_content,
-                change_description=f"Updated {stack}/{plan.helm_chart}/tag.yaml: " + 
+                change_description=f"Updated {stack}/{plan.helm_chart}/tag.yaml: " +
                                  ", ".join(change_descriptions)
             ),
             'changes': changes
-        })
-    
+        }
+
+        # Check for argocdApplication override in values.yaml
+        override_change = _check_and_remove_override(stack, plan.helm_chart, io_layer)
+        if override_change:
+            stack_change['override_change'] = override_change
+
+        stack_changes.append(stack_change)
+
     return stack_changes
+
+def _check_and_remove_override(
+    stack: str, helm_chart: str, io_layer: IOLayer
+) -> Optional[FileChange]:
+    """Check values.yaml for argocdApplication.appManifestsRevision and remove it if present.
+
+    Returns a FileChange if an override was found and should be removed, None otherwise.
+    """
+    values_file_path = f"{stack}/{helm_chart}/values.yaml"
+    try:
+        values_content = io_layer.read_file(values_file_path)
+        if values_content is None:
+            return None
+    except Exception as e:
+        print(f"Warning: could not read {values_file_path}, skipping override check: {e}")
+        return None
+
+    try:
+        values_data = yaml.safe_load(values_content)
+    except yaml.YAMLError as e:
+        print(f"Warning: could not parse {values_file_path}, skipping override check: {e}")
+        return None
+
+    if not isinstance(values_data, dict):
+        return None
+
+    argo_app = values_data.get("argocdApplication")
+    if not isinstance(argo_app, dict):
+        return None
+
+    revision = argo_app.get("appManifestsRevision")
+    if not revision or revision == "main":
+        return None
+
+    import copy
+    new_data = copy.deepcopy(values_data)
+    del new_data["argocdApplication"]["appManifestsRevision"]
+
+    # If argocdApplication is now empty, remove the entire block
+    if not new_data["argocdApplication"]:
+        del new_data["argocdApplication"]
+
+    new_content = yaml.dump(new_data, default_flow_style=False, sort_keys=False) if new_data else ""
+
+    print(f"Detected appManifestsRevision override ({revision}) in {values_file_path}, will remove it")
+
+    return FileChange(
+        file_path=values_file_path,
+        old_content=values_content,
+        new_content=new_content,
+        change_description=f"Removed appManifestsRevision override ({revision}) from {values_file_path}",
+    )
+
 
 def calculate_tag_changes(
     current_data: Dict[str, Any],
@@ -469,11 +531,21 @@ def _create_pr_plan(pr_group: Dict[str, Any], plan: UpdatePlan, config: Environm
         target_stacks=pr_group['stacks']
     )
     
+    # Collect removed overrides for PR body
+    removed_overrides = []
+    for change in pr_group['changes']:
+        if 'override_change' in change:
+            removed_overrides.append({
+                'stack': change['stack'],
+                'description': change['override_change'].change_description,
+            })
+
     # Generate PR body
     pr_body = format_pr_body_with_metadata(
         helm_chart=plan.helm_chart,
         image_tag=plan.image_tag,
-        metadata=plan.metadata
+        metadata=plan.metadata,
+        removed_overrides=removed_overrides,
     )
     
     # Determine auto-merge
@@ -485,9 +557,12 @@ def _create_pr_plan(pr_group: Dict[str, Any], plan: UpdatePlan, config: Environm
     print(f"   - strategy: {plan.strategy}")
     print(f"   - decision: {'AUTO-MERGE' if auto_merge else 'MANUAL ONLY'}")
     
-    # Get files to commit
+    # Get files to commit (tag.yaml + any override values.yaml changes)
     files_to_commit = [change['file_change'].file_path for change in pr_group['changes']]
-    
+    for change in pr_group['changes']:
+        if 'override_change' in change:
+            files_to_commit.append(change['override_change'].file_path)
+
     return PRPlan(
         branch_name=branch_name,
         pr_title=pr_title,

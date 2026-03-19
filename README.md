@@ -12,6 +12,7 @@ A Python tool for automating image tag updates across Helm charts in different K
 - Multi-stage deployment support
 - Extra tag updates for complex configurations
 - Detailed logging and error handling
+- Automatically removes ArgoCD branch overrides (`appManifestsRevision`) from `values.yaml` in the same PR
 
 ## Installation
 
@@ -222,6 +223,39 @@ Image tags must follow these formats:
 ## Auto-Approve
 
 When `AUTOMERGE` is set to `false`, created PRs are automatically approved using the `GH_APPROVE_TOKEN` (machine user `keboola-sre-approve-bot`). This satisfies CODEOWNERS approval requirements so that humans can merge PRs without waiting for additional reviews. Auto-approve is skipped when `AUTOMERGE=true` (since PRs are merged immediately) and during dry runs.
+
+## Override Removal
+
+When updating image tags, the tool automatically checks each target stack's `{helm-chart}/values.yaml` for ArgoCD branch overrides and removes them in the same PR.
+
+**What gets removed:** The `argocdApplication.appManifestsRevision` field, when set to anything other than `"main"`. Developers sometimes set this to a feature branch for testing, but leaving it in place causes ArgoCD to keep deploying from that branch, silently ignoring any new image tag updates.
+
+**What is preserved:** All other fields in `values.yaml` remain untouched. If removing `appManifestsRevision` leaves the `argocdApplication` block empty, the entire block is removed. If the file becomes empty as a result, an empty file is written.
+
+**No configuration required** — this behavior is always active and runs automatically for every stack update.
+
+**Visibility:** When overrides are removed, the PR body includes a "⚠️ Removed Branch Overrides" section listing exactly which files were modified.
+
+Example `values.yaml` before update:
+
+```yaml
+argocdApplication:
+  appManifestsRevision: my-feature-branch
+  someOtherField: value
+```
+
+After update (override removed, other fields preserved):
+
+```yaml
+argocdApplication:
+  someOtherField: value
+```
+
+If `argocdApplication` only contained `appManifestsRevision`, the entire block is removed:
+
+```yaml
+# (empty file)
+```
 
 ## Multi-Stage Deployment
 
