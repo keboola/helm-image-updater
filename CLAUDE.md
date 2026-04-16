@@ -118,3 +118,49 @@ The test suite covers:
 - Configuration validation and error handling
 
 Tests use pytest with fixtures defined in `conftest.py` for common setup like mock repositories and GitHub clients.
+
+## Development Workflow
+
+When making changes, follow this workflow:
+
+### 1. Run unit tests locally
+```bash
+pytest -sv tests/
+```
+All 74 tests must pass before proceeding.
+
+### 2. Create a draft PR
+```bash
+gh pr create --draft --title "..." --body "..."
+```
+- Always use the PR template from `.github/pull_request_template.md`
+- Always create as draft
+- Include the Linear task ID (e.g. `[ST-XXXX]`) in the PR body
+
+### 3. Trigger E2E tests
+The E2E test suite lives in a separate repo (`keboola/helm-image-updater-testing`). Trigger it against your branch:
+```bash
+gh workflow run test-suite.yaml \
+  --repo keboola/helm-image-updater-testing \
+  --field helm-image-updater-branch=<your-branch-name>
+```
+Get the run URL:
+```bash
+gh run list --repo keboola/helm-image-updater-testing --workflow=test-suite.yaml --limit 1 --json url --jq '.[0].url'
+```
+Monitor until completion:
+```bash
+gh run view <run-id> --repo keboola/helm-image-updater-testing --json status,conclusion,jobs \
+  --jq '{status: .status, conclusion: .conclusion, jobs: [.jobs[] | {name: .name, conclusion: .conclusion}]}'
+```
+
+### 4. Update PR with E2E results
+Once the E2E suite passes, add the run link to the PR description under an `## E2E tests` section:
+```bash
+gh pr edit <pr-number> --body "...(updated body with E2E test link)..."
+```
+
+### 5. If E2E tests fail
+- Check which test cases failed and read the logs
+- Fix the code, push, and re-trigger the E2E suite
+- Repeat until all 9 test scenarios pass
