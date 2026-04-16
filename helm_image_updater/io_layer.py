@@ -91,8 +91,8 @@ class IOLayer:
         file_path.parent.mkdir(parents=True, exist_ok=True)
         
         with file_path.open('w') as f:
-            yaml.dump(data, f)
-        
+            yaml.dump(data, f, default_flow_style=False, sort_keys=False)
+
         return True
     
     def write_file_changes(self, file_changes) -> bool:
@@ -110,16 +110,10 @@ class IOLayer:
             return False
         
         for file_change in file_changes:
-            if file_change.file_path.endswith(('.yaml', '.yml')) and file_change.new_content.strip():
-                # For YAML files, parse and write properly
-                data = yaml.safe_load(file_change.new_content)
-                self.write_yaml(file_change.file_path, data)
-            else:
-                # For other files, write as text
-                file_path = Path(file_change.file_path)
-                file_path.parent.mkdir(parents=True, exist_ok=True)
-                with file_path.open('w') as f:
-                    f.write(file_change.new_content)
+            file_path = Path(file_change.file_path)
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            with file_path.open('w') as f:
+                f.write(file_change.new_content)
         
         return True
     

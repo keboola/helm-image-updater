@@ -565,3 +565,160 @@ class TestOverrideIntegration:
         # Should have only 1 file change: tag.yaml
         assert len(plan.file_changes) == 1
         assert plan.file_changes[0].file_path == f"{stack_name}/test-chart/tag.yaml"
+
+
+class TestYamlFormattingPreservation:
+    """Tests that YAML formatting (key order, blank lines, quotes) is preserved."""
+
+    def test_tag_update_preserves_key_order(self):
+        """Tag update should not reorder keys in tag.yaml."""
+        mock_io = Mock()
+        # Deliberately non-alphabetical key order
+        original_content = (
+            "image:\n"
+            "  tag: old-tag\n"
+            "zebra: value\n"
+            "apple: value\n"
+        )
+        mock_io.read_file.return_value = original_content
+
+        from helm_image_updater.plan_builder import _calculate_all_changes
+        from helm_image_updater.models import UpdatePlan, UpdateStrategy
+
+        plan = UpdatePlan(
+            strategy=UpdateStrategy.DEV,
+            helm_chart="test-chart",
+            image_tag="dev-new-tag",
+        )
+        plan.target_stacks = ["dev-stack"]
+
+        changes = _calculate_all_changes(plan, mock_io)
+
+        assert len(changes) == 1
+        new_content = changes[0]['file_change'].new_content
+        lines = new_content.strip().split('\n')
+        # Keys should remain in original order: image, zebra, apple
+        top_level_keys = [l.split(':')[0] for l in lines if not l.startswith(' ')]
+        assert top_level_keys == ['image', 'zebra', 'apple']
+
+    def test_tag_update_preserves_blank_lines(self):
+        """Tag update should preserve blank lines between sections."""
+        mock_io = Mock()
+        original_content = (
+            "image:\n"
+            "  tag: old-tag\n"
+            "\n"
+            "resources:\n"
+            "  cpu: 100m\n"
+        )
+        mock_io.read_file.return_value = original_content
+
+        from helm_image_updater.plan_builder import _calculate_all_changes
+        from helm_image_updater.models import UpdatePlan, UpdateStrategy
+
+        plan = UpdatePlan(
+            strategy=UpdateStrategy.DEV,
+            helm_chart="test-chart",
+            image_tag="dev-new-tag",
+        )
+        plan.target_stacks = ["dev-stack"]
+
+        changes = _calculate_all_changes(plan, mock_io)
+
+        assert len(changes) == 1
+        new_content = changes[0]['file_change'].new_content
+        # Blank line between sections should be preserved
+        assert "\n\nresources:" in new_content
+
+    def test_tag_update_preserves_quoted_values(self):
+        """Tag update should not strip quotes from other values."""
+        mock_io = Mock()
+        original_content = (
+            'image:\n'
+            '  tag: old-tag\n'
+            '  repository: "keboola/my-service"\n'
+            'resources:\n'
+            '  cpu: "100m"\n'
+            '  memory: "256Mi"\n'
+        )
+        mock_io.read_file.return_value = original_content
+
+        from helm_image_updater.plan_builder import _calculate_all_changes
+        from helm_image_updater.models import UpdatePlan, UpdateStrategy
+
+        plan = UpdatePlan(
+            strategy=UpdateStrategy.DEV,
+            helm_chart="test-chart",
+            image_tag="dev-new-tag",
+        )
+        plan.target_stacks = ["dev-stack"]
+
+        changes = _calculate_all_changes(plan, mock_io)
+
+        assert len(changes) == 1
+        new_content = changes[0]['file_change'].new_content
+        # Quoted values should remain quoted
+        assert '"keboola/my-service"' in new_content
+        assert '"100m"' in new_content
+        assert '"256Mi"' in new_content
+
+    def test_override_removal_preserves_formatting(self):
+        """Override removal should preserve key order, blank lines, and quotes."""
+        mock_io = Mock()
+        original_content = (
+            'image:\n'
+            '  repository: "keboola/oauth-service"\n'
+            '\n'
+            'apiReplicaCount: 0\n'
+            'messengerConsumerReplicaCount: 0\n'
+            '\n'
+            'apiResources:\n'
+            '  requests:\n'
+            '    cpu: "10m"\n'
+            '    memory: "50Mi"\n'
+            '\n'
+            'argocdApplication:\n'
+            '  appManifestsRevision: feature-branch-123\n'
+        )
+        mock_io.read_file.return_value = original_content
+
+        result = _check_and_remove_override("dev-stack", "my-chart", mock_io)
+
+        assert result is not None
+        new_content = result.new_content
+
+        # Key order preserved
+        lines = [l for l in new_content.split('\n') if l and not l.startswith(' ')]
+        top_keys = [l.split(':')[0] for l in lines]
+        assert top_keys == ['image', 'apiReplicaCount', 'messengerConsumerReplicaCount', 'apiResources']
+
+        # Quoted values preserved
+        assert '"10m"' in new_content
+        assert '"50Mi"' in new_content
+        assert '"keboola/oauth-service"' in new_content
+
+        # argocdApplication block removed
+        assert 'argocdApplication' not in new_content
+
+    def test_override_removal_preserves_other_argocd_fields_formatting(self):
+        """When argocdApplication has other fields, their formatting is preserved."""
+        mock_io = Mock()
+        original_content = (
+            'image:\n'
+            '  repository: "keboola/my-service"\n'
+            '\n'
+            'argocdApplication:\n'
+            '  appManifestsRevision: feature-branch\n'
+            '  syncPolicy: "automated"\n'
+        )
+        mock_io.read_file.return_value = original_content
+
+        result = _check_and_remove_override("dev-stack", "my-chart", mock_io)
+
+        assert result is not None
+        new_content = result.new_content
+
+        # syncPolicy should remain with its quoted value
+        assert '"automated"' in new_content
+        assert 'appManifestsRevision' not in new_content
+        assert 'argocdApplication' in new_content
