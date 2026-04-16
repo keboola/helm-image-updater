@@ -440,8 +440,56 @@ class TestCheckAndRemoveOverride:
 class TestOverrideIntegration:
     """Integration tests for override removal in the full plan flow."""
 
-    def test_plan_includes_override_removal(self, tmp_path, monkeypatch):
-        """prepare_plan includes override FileChange when values.yaml has an override."""
+    def test_plan_includes_override_removal_for_production(self, tmp_path, monkeypatch):
+        """prepare_plan includes override FileChange when values.yaml has an override and tag is production."""
+        # Set up a production stack with tag.yaml and values.yaml with override
+        stack_name = "com-keboola-gcp-prod"
+        stack_dir = tmp_path / stack_name
+        chart_dir = stack_dir / "test-chart"
+        chart_dir.mkdir(parents=True)
+
+        # Create tag.yaml
+        create_tag_yaml(chart_dir / "tag.yaml", "old-tag")
+
+        # Create values.yaml with override
+        with open(chart_dir / "values.yaml", "w") as f:
+            yaml.dump({"argocdApplication": {"appManifestsRevision": "feature-branch"}}, f)
+
+        # Create shared-values.yaml
+        with open(stack_dir / "shared-values.yaml", "w") as f:
+            yaml.dump({"cloudProvider": "gcp"}, f)
+
+        monkeypatch.chdir(tmp_path)
+
+        mock_env = {
+            "HELM_CHART": "test-chart",
+            "IMAGE_TAG": "production-new-tag",
+            "GH_TOKEN": "fake-token",
+            "AUTOMERGE": "true",
+            "DRY_RUN": "true",
+            "MULTI_STAGE": "false",
+            "TARGET_PATH": str(tmp_path),
+        }
+
+        config = EnvironmentConfig.from_env(mock_env)
+        mock_repo = Mock()
+        mock_github_repo = Mock()
+        io_layer = IOLayer(mock_repo, mock_github_repo, dry_run=True, approve_github_repo=Mock())
+
+        plan = prepare_plan(config, io_layer)
+
+        # Should have 2 file changes: tag.yaml + values.yaml
+        assert len(plan.file_changes) == 2
+        file_paths = [fc.file_path for fc in plan.file_changes]
+        assert f"{stack_name}/test-chart/tag.yaml" in file_paths
+        assert f"{stack_name}/test-chart/values.yaml" in file_paths
+
+        # PR should include both files
+        assert len(plan.pr_plans) == 1
+        assert f"{stack_name}/test-chart/values.yaml" in plan.pr_plans[0].files_to_commit
+
+    def test_plan_skips_override_removal_for_dev(self, tmp_path, monkeypatch):
+        """prepare_plan does NOT remove override when tag is dev."""
         # Set up a dev stack with tag.yaml and values.yaml with override
         stack_name = "dev-keboola-gcp-us-central1"
         stack_dir = tmp_path / stack_name
@@ -478,15 +526,9 @@ class TestOverrideIntegration:
 
         plan = prepare_plan(config, io_layer)
 
-        # Should have 2 file changes: tag.yaml + values.yaml
-        assert len(plan.file_changes) == 2
-        file_paths = [fc.file_path for fc in plan.file_changes]
-        assert f"{stack_name}/test-chart/tag.yaml" in file_paths
-        assert f"{stack_name}/test-chart/values.yaml" in file_paths
-
-        # PR should include both files
-        assert len(plan.pr_plans) == 1
-        assert f"{stack_name}/test-chart/values.yaml" in plan.pr_plans[0].files_to_commit
+        # Should have only 1 file change: tag.yaml (no override removal)
+        assert len(plan.file_changes) == 1
+        assert plan.file_changes[0].file_path == f"{stack_name}/test-chart/tag.yaml"
 
     def test_plan_without_override_has_only_tag_change(self, tmp_path, monkeypatch):
         """prepare_plan only has tag.yaml change when no override exists."""
