@@ -235,8 +235,8 @@ def _calculate_all_changes(plan: UpdatePlan, io_layer: IOLayer) -> List[Dict[str
             'changes': changes
         }
 
-        # Check for argocdApplication override in values.yaml (only for production releases, not dev)
-        if plan.strategy != UpdateStrategy.DEV:
+        # Check for argocdApplication override in values.yaml (only for production releases)
+        if plan.strategy == UpdateStrategy.PRODUCTION:
             override_change = _check_and_remove_override(stack, plan.helm_chart, io_layer)
             if override_change:
                 stack_change['override_change'] = override_change
