@@ -14,8 +14,12 @@ Helm Image Updater is a Python tool that automates image tag updates across Helm
 python -m venv .venv
 source .venv/bin/activate
 
-# Install dependencies
+# Install dependencies (runtime only)
 pip install -r requirements.txt
+
+# Or install runtime + dev/test dependencies
+pip install -r requirements-dev.txt
+
 pip install -e .
 ```
 

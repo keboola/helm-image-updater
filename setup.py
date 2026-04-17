@@ -24,10 +24,10 @@ if requirements_file.exists():
     with open(requirements_file, encoding="utf-8") as f:
         requirements = f.read().splitlines()
 else:
-    # Default requirements if file is not found.
-    # IMPORTANT: Keep this list in sync with requirements.txt — when pip
-    # installs from an sdist, requirements.txt may not be present, so pip
-    # falls back to this list when building metadata.
+    # Fallback runtime requirements if requirements.txt is not found.
+    # IMPORTANT: Keep this list in sync with requirements.txt. Both should
+    # contain only runtime dependencies — test/dev dependencies belong in
+    # requirements-dev.txt so they aren't installed in production.
     requirements = [
         "PyYAML>=6.0",
         "ruamel.yaml>=0.18.0",
