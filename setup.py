@@ -24,9 +24,13 @@ if requirements_file.exists():
     with open(requirements_file, encoding="utf-8") as f:
         requirements = f.read().splitlines()
 else:
-    # Default requirements if file is not found
+    # Default requirements if file is not found.
+    # IMPORTANT: Keep this list in sync with requirements.txt — when pip
+    # installs from an sdist, requirements.txt may not be present, so pip
+    # falls back to this list when building metadata.
     requirements = [
         "PyYAML>=6.0",
+        "ruamel.yaml>=0.18.0",
         "GitPython>=3.1.0",
         "PyGithub>=2.1.1",
         "dpath>=2.1.0",
