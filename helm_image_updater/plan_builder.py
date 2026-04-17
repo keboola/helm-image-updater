@@ -1,8 +1,14 @@
 """Plan builder - creates an execution plan from configuration."""
 
 import os
-import yaml
+from io import StringIO
 from typing import List, Dict, Any, Optional
+
+from ruamel.yaml import YAML, YAMLError
+
+# Module-level ruamel.yaml instance for round-trip (format-preserving) operations
+_ryaml = YAML()
+_ryaml.preserve_quotes = True
 
 from .models import UpdatePlan, FileChange, PRPlan, UpdateStrategy, TagChange
 from .environment import EnvironmentConfig
@@ -195,12 +201,12 @@ def _calculate_all_changes(plan: UpdatePlan, io_layer: IOLayer) -> List[Dict[str
             if current_content is None:
                 print(f"Warning: {tag_file_path} not found, skipping")
                 continue
-                
-            current_data = yaml.safe_load(current_content)
+
+            current_data = _ryaml.load(current_content)
         except Exception as e:
             print(f"Warning: Failed to read {tag_file_path}: {e}")
             continue
-        
+
         # Calculate changes
         changes = calculate_tag_changes(
             current_data=current_data,
@@ -208,13 +214,15 @@ def _calculate_all_changes(plan: UpdatePlan, io_layer: IOLayer) -> List[Dict[str
             extra_tags=plan.extra_tags,
             commit_sha=plan.metadata.get("commit_sha")
         )
-        
+
         if not changes:
             continue
-        
-        # Apply changes to create new content
+
+        # Apply changes to create new content (preserving formatting)
         new_data = _apply_changes_to_data(current_data, changes)
-        new_content = yaml.dump(new_data, default_flow_style=False, sort_keys=False)
+        stream = StringIO()
+        _ryaml.dump(new_data, stream)
+        new_content = stream.getvalue()
         
         # Create change description
         change_descriptions = []
@@ -262,8 +270,8 @@ def _check_and_remove_override(
         return None
 
     try:
-        values_data = yaml.safe_load(values_content)
-    except yaml.YAMLError as e:
+        values_data = _ryaml.load(values_content)
+    except YAMLError as e:
         print(f"Warning: could not parse {values_file_path}, skipping override check: {e}")
         return None
 
@@ -278,15 +286,18 @@ def _check_and_remove_override(
     if not revision or revision == "main":
         return None
 
-    import copy
-    new_data = copy.deepcopy(values_data)
-    del new_data["argocdApplication"]["appManifestsRevision"]
+    del values_data["argocdApplication"]["appManifestsRevision"]
 
     # If argocdApplication is now empty, remove the entire block
-    if not new_data["argocdApplication"]:
-        del new_data["argocdApplication"]
+    if not values_data["argocdApplication"]:
+        del values_data["argocdApplication"]
 
-    new_content = yaml.dump(new_data, default_flow_style=False, sort_keys=False) if new_data else ""
+    if values_data:
+        stream = StringIO()
+        _ryaml.dump(values_data, stream)
+        new_content = stream.getvalue()
+    else:
+        new_content = ""
 
     print(f"Detected appManifestsRevision override ({revision}) in {values_file_path}, will remove it")
 
