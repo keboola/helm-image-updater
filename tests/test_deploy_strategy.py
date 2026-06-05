@@ -161,3 +161,11 @@ def test_resolve_wave_rejects_out_of_range():
     import pytest
     with pytest.raises(ValueError):
         resolve_wave("kbc-us-east-1", {"rollout_wave": 5})
+
+
+def test_resolve_wave_rejects_non_integer():
+    import pytest
+    with pytest.raises(ValueError):
+        resolve_wave("kbc-us-east-1", {"rollout_wave": 1.9})
+    with pytest.raises(ValueError):
+        resolve_wave("kbc-us-east-1", {"rollout_wave": True})
