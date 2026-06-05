@@ -184,7 +184,9 @@ def test_multi_cloud_multi_stage_grouping_production_tag(test_stacks):
     # Create mock environment config
     mock_config = Mock()
     mock_config.automerge = True
-    
+    from helm_image_updater.models import DeployStrategy
+    mock_config.deploy_strategy = DeployStrategy.STANDARD
+
     # Create mock plan
     mock_plan = Mock()
     mock_plan.multi_stage = True
@@ -244,7 +246,9 @@ def test_multi_cloud_grouping_non_multi_stage(test_stacks):
     # Create mock environment config
     mock_config = Mock()
     mock_config.automerge = True
-    
+    from helm_image_updater.models import DeployStrategy
+    mock_config.deploy_strategy = DeployStrategy.STANDARD
+
     # Create mock plan (non-multi-stage)
     mock_plan = Mock()
     mock_plan.multi_stage = False  # Non-multi-stage
@@ -287,7 +291,9 @@ def test_multi_cloud_grouping_dev_strategy(test_stacks):
     # Create mock environment config
     mock_config = Mock()
     mock_config.automerge = True
-    
+    from helm_image_updater.models import DeployStrategy
+    mock_config.deploy_strategy = DeployStrategy.STANDARD
+
     # Create mock plan (dev strategy, even with multi_stage=True)
     mock_plan = Mock()
     mock_plan.multi_stage = True

@@ -10,7 +10,8 @@ from ruamel.yaml import YAML, YAMLError
 _ryaml = YAML()
 _ryaml.preserve_quotes = True
 
-from .models import UpdatePlan, FileChange, PRPlan, UpdateStrategy, TagChange
+from .models import UpdatePlan, FileChange, PRPlan, UpdateStrategy, TagChange, DeployStrategy
+from .wave_planning import compute_release_id, release_id_label, wave_label, deploy_label, resolve_wave
 from .environment import EnvironmentConfig
 from .io_layer import IOLayer
 from .tag_classification import detect_tag_type, TagType
@@ -405,7 +406,11 @@ def _group_changes_for_prs(
     io_layer: IOLayer
 ) -> List[Dict[str, Any]]:
     """Group changes into pull requests based on strategy."""
-    
+
+    # Promoter-managed wave strategies: one PR per wave (0..3), unmerged, labeled.
+    if config.deploy_strategy.is_wave:
+        return _group_changes_by_wave(stack_changes, plan, config, io_layer)
+
     if plan.strategy == UpdateStrategy.CANARY:
         # Canary: always one PR
         return [{
@@ -488,6 +493,42 @@ def _group_changes_for_prs(
             }
             for sc in stack_changes
         ]
+
+
+def _group_changes_by_wave(stack_changes, plan, config, io_layer):
+    """Group changes into one PR per rollout wave (0..3) for promoter consumption."""
+    release_id = compute_release_id(plan.helm_chart, plan.image_tag)
+    deploy_lbl = deploy_label(config.deploy_strategy)
+
+    by_wave = {}
+    for sc in stack_changes:
+        metadata = io_layer.read_yaml(f"{sc['stack']}/stack-metadata.yaml")
+        wave = resolve_wave(sc['stack'], metadata)
+        by_wave.setdefault(wave, []).append(sc)
+
+    present = set(by_wave)
+    required = {0, 1, 2, 3}
+    if present != required:
+        missing = sorted(required - present)
+        raise RuntimeError(
+            f"Wave deploy requires non-empty waves 0..3 (promoter needs a contiguous "
+            f"release:wave:0..3); missing/empty waves: {missing}. "
+            f"Check rollout_wave in stack-metadata.yaml across target stacks."
+        )
+
+    groups = []
+    for wave in sorted(by_wave):
+        changes = by_wave[wave]
+        groups.append({
+            'stacks': [sc['stack'] for sc in changes],
+            'changes': changes,
+            'base_branch': 'main',
+            'pr_type': 'wave',
+            'wave_number': wave,
+            'release_id': release_id,
+            'labels': [release_id_label(release_id), wave_label(wave), deploy_lbl],
+        })
+    return groups
 
 
 def _create_pr_plan(pr_group: Dict[str, Any], plan: UpdatePlan, config: EnvironmentConfig) -> PRPlan:
