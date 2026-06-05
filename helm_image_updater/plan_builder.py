@@ -87,7 +87,11 @@ def prepare_plan(config: EnvironmentConfig, io_layer: IOLayer) -> UpdatePlan:
     
     # Group changes into PRs
     pr_groups = _group_changes_for_prs(stack_changes, plan, config, io_layer)
-    
+
+    # Idempotency: in wave mode, never fan out a duplicate release.
+    if config.deploy_strategy.is_wave and not config.dry_run and pr_groups:
+        _guard_release_not_already_open(pr_groups[0]['release_id'], io_layer)
+
     # Create PR plans
     for pr_group in pr_groups:
         pr_plan = _create_pr_plan(pr_group, plan, config)
@@ -507,6 +511,21 @@ def _group_changes_by_wave(stack_changes, plan, config, io_layer):
             'labels': [release_id_label(release_id), wave_label(wave), deploy_lbl],
         })
     return groups
+
+
+def _guard_release_not_already_open(release_id: str, io_layer: IOLayer) -> None:
+    """Fail loudly if a release with this id already has open PRs (re-run safety).
+
+    Creating a second set of wave PRs with the same release:id would give promoter
+    duplicate release:wave:N labels -> ¬wellFormed -> Conflicted.
+    """
+    existing = io_layer.find_prs_by_label(release_id_label(release_id))
+    if existing:
+        raise RuntimeError(
+            f"Release '{release_id}' already has open PRs {existing}. "
+            f"Refusing to create duplicate wave PRs (would make the release Conflicted). "
+            f"Close/finish the existing release first."
+        )
 
 
 def _create_pr_plan(pr_group: Dict[str, Any], plan: UpdatePlan, config: EnvironmentConfig) -> PRPlan:

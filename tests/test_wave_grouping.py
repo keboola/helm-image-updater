@@ -229,3 +229,21 @@ def test_create_pull_request_provisions_and_applies_labels():
     pr.add_to_labels.assert_called_once_with(
         "release:id:dummy-service-deadbeef0123", "release:wave:2", "deploy:gradual"
     )
+
+
+import pytest
+from helm_image_updater.plan_builder import _guard_release_not_already_open
+
+
+def test_guard_raises_when_release_id_already_has_open_prs():
+    io = Mock()
+    io.find_prs_by_label.return_value = [101, 102]  # existing open PRs
+    with pytest.raises(RuntimeError, match="already"):
+        _guard_release_not_already_open("dummy-service-deadbeef0123", io)
+
+
+def test_guard_passes_when_no_existing_prs():
+    io = Mock()
+    io.find_prs_by_label.return_value = []
+    # Should not raise.
+    _guard_release_not_already_open("dummy-service-deadbeef0123", io)

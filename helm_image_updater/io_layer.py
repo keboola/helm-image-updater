@@ -380,6 +380,14 @@ class IOLayer:
                         pr_url=pr.html_url
                     )
 
+    def find_prs_by_label(self, label: str) -> List[int]:
+        """Return open PR numbers carrying the given label (idempotency check)."""
+        numbers = []
+        for issue in self.github_repo.get_issues(state="open", labels=[label]):
+            if issue.pull_request is not None:
+                numbers.append(issue.number)
+        return numbers
+
     def _ensure_labels_exist(self, names: List[str]) -> None:
         """Create-if-missing each label (tolerate already-exists)."""
         for name in names:
