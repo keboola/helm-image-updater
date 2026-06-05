@@ -163,5 +163,20 @@ class EnvironmentConfig:
                 tag_type = detect_tag_type(tag["value"])
                 if tag_type == TagType.INVALID:
                     errors.append(f"Invalid EXTRA_TAG{i} format: '{tag['value']}'. Must start with 'dev-', 'production-', 'canary-' or be a valid semver (e.g., 1.2.3)")
-        
+
+        # DEPLOY_STRATEGY validation
+        if self._deploy_strategy_error:
+            errors.append(self._deploy_strategy_error)
+
+        if self.deploy_strategy.is_wave:
+            if self.override_stack:
+                errors.append("DEPLOY_STRATEGY wave modes are incompatible with OVERRIDE_STACK")
+            elif self.image_tag:
+                tag_type = detect_tag_type(self.image_tag)
+                if tag_type not in (TagType.PRODUCTION, TagType.SEMVER):
+                    errors.append(
+                        f"DEPLOY_STRATEGY '{self.deploy_strategy.value}' requires a production/semver "
+                        f"IMAGE_TAG, got '{self.image_tag}'"
+                    )
+
         return errors

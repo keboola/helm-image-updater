@@ -48,3 +48,28 @@ def test_cloud_multi_stage_sets_multi_stage_flag():
     cfg = EnvironmentConfig.from_env(_base_env(DEPLOY_STRATEGY="cloud_multi_stage"))
     assert cfg.deploy_strategy == DeployStrategy.CLOUD_MULTI_STAGE
     assert cfg.multi_stage is True
+
+
+def test_unknown_deploy_strategy_is_a_validation_error():
+    cfg = EnvironmentConfig.from_env(_base_env(DEPLOY_STRATEGY="gradul"))
+    errors = cfg.validate()
+    assert any("Invalid DEPLOY_STRATEGY" in e for e in errors)
+
+
+def test_wave_strategy_requires_production_tag():
+    cfg = EnvironmentConfig.from_env(_base_env(IMAGE_TAG="dev-abc", DEPLOY_STRATEGY="gradual"))
+    errors = cfg.validate()
+    assert any("requires a production" in e for e in errors)
+
+
+def test_wave_strategy_ok_with_production_tag():
+    cfg = EnvironmentConfig.from_env(_base_env(IMAGE_TAG="production-abc", DEPLOY_STRATEGY="gradual"))
+    assert cfg.validate() == []
+
+
+def test_wave_strategy_rejected_with_override_stack():
+    cfg = EnvironmentConfig.from_env(
+        _base_env(DEPLOY_STRATEGY="critical", OVERRIDE_STACK="kbc-us-east-1")
+    )
+    errors = cfg.validate()
+    assert any("OVERRIDE_STACK" in e for e in errors)
