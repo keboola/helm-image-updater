@@ -52,6 +52,26 @@ def test_wave_grouping_one_pr_per_wave_with_labels():
     assert "release:wave:1" in g1["labels"]
     assert "deploy:gradual" in g1["labels"]
 
+    # Strengthen: all 4 groups must have the correct label structure
+    release_id_labels = [
+        next(l for l in g["labels"] if l.startswith("release:id:"))
+        for g in groups
+    ]
+    # All groups share the same release:id label
+    assert len(set(release_id_labels)) == 1, (
+        f"All groups must share the same release:id:* label, got: {release_id_labels}"
+    )
+    # Each release:id label is ≤ 50 chars
+    for rid_label in release_id_labels:
+        assert len(rid_label) <= 50, f"release:id label too long: {rid_label!r}"
+
+    for g in groups:
+        wave = g["wave_number"]
+        expected_labels = [release_id_labels[0], f"release:wave:{wave}", "deploy:gradual"]
+        assert g["labels"] == expected_labels, (
+            f"Wave {wave} labels {g['labels']} != expected {expected_labels}"
+        )
+
 
 def test_wave_grouping_requires_all_waves_0_to_3():
     import pytest
@@ -64,3 +84,71 @@ def test_wave_grouping_requires_all_waves_0_to_3():
 
     with pytest.raises(RuntimeError, match="wave"):
         _group_changes_for_prs([_stack_change(s) for s in waves], plan, config, io)
+
+
+def test_wave_grouping_rejects_gap():
+    """waves {0,1,3} (no wave-2 stack) → RuntimeError."""
+    import pytest
+    waves = {
+        "dev-keboola-gcp-us-central1": 0,
+        "com-keboola-azure-north-europe": 1,
+        "cloud-keboola-cs": 3,
+    }
+    io = Mock()
+    io.read_yaml.side_effect = _wave_metadata(waves)
+    config = Mock(); config.deploy_strategy = DeployStrategy.GRADUAL
+    plan = Mock(); plan.strategy = UpdateStrategy.PRODUCTION; plan.multi_stage = False
+    plan.helm_chart = "dummy-service"; plan.image_tag = "production-abc"
+
+    with pytest.raises(RuntimeError, match="wave"):
+        _group_changes_for_prs([_stack_change(s) for s in waves], plan, config, io)
+
+
+def test_wave_grouping_rejects_missing_last():
+    """waves {0,1,2} (no wave-3 stack) → RuntimeError."""
+    import pytest
+    waves = {
+        "dev-keboola-gcp-us-central1": 0,
+        "com-keboola-azure-north-europe": 1,
+        "kbc-us-east-1": 2,
+    }
+    io = Mock()
+    io.read_yaml.side_effect = _wave_metadata(waves)
+    config = Mock(); config.deploy_strategy = DeployStrategy.GRADUAL
+    plan = Mock(); plan.strategy = UpdateStrategy.PRODUCTION; plan.multi_stage = False
+    plan.helm_chart = "dummy-service"; plan.image_tag = "production-abc"
+
+    with pytest.raises(RuntimeError, match="wave"):
+        _group_changes_for_prs([_stack_change(s) for s in waves], plan, config, io)
+
+
+def test_wave_grouping_missing_metadata_uses_defaults():
+    """read_yaml returns None for dev stack → defaults to wave 0; others explicit."""
+    waves_explicit = {
+        "com-keboola-azure-north-europe": 1,
+        "kbc-us-east-1": 2,
+        "cloud-keboola-cs": 3,
+    }
+    dev_stack = "dev-keboola-gcp-us-central1"
+
+    def _read(path):
+        # Return None for the dev stack, metadata dict for the others
+        for stack, wave in waves_explicit.items():
+            if path == f"{stack}/stack-metadata.yaml":
+                return {"rollout_wave": wave}
+        return None  # covers the dev stack and any unknown path
+
+    io = Mock()
+    io.read_yaml.side_effect = _read
+    config = Mock(); config.deploy_strategy = DeployStrategy.GRADUAL
+    plan = Mock(); plan.strategy = UpdateStrategy.PRODUCTION; plan.multi_stage = False
+    plan.helm_chart = "dummy-service"; plan.image_tag = "production-abc123"
+
+    all_stacks = [dev_stack] + list(waves_explicit.keys())
+    groups = _group_changes_for_prs([_stack_change(s) for s in all_stacks], plan, config, io)
+
+    assert len(groups) == 4
+    by_wave = {g["wave_number"]: g for g in groups}
+    assert set(by_wave) == {0, 1, 2, 3}
+    # The dev stack must have landed in wave 0
+    assert dev_stack in by_wave[0]["stacks"]
