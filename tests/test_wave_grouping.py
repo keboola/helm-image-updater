@@ -194,3 +194,8 @@ def test_create_pr_plan_wave_sets_labels_and_branch_title():
     assert pr_plan.auto_merge is False
     assert "wave2" in pr_plan.branch_name
     assert "wave 2" in pr_plan.pr_title
+
+
+def test_wave_never_auto_merges_even_for_canary_strategy():
+    plan = Mock(); plan.strategy = UpdateStrategy.CANARY
+    assert _should_auto_merge(plan, "wave", user_requested=True) is False
