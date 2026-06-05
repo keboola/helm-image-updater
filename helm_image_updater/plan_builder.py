@@ -482,6 +482,9 @@ def _group_changes_by_wave(stack_changes, plan, config, io_layer):
     release_id = compute_release_id(plan.helm_chart, plan.image_tag)
     deploy_lbl = deploy_label(config.deploy_strategy)
 
+    # Never roll an e2e stack into a production wave (defensive — known e2e are also in EXCLUDED_STACKS).
+    stack_changes = [sc for sc in stack_changes if not sc['stack'].endswith('-e2e')]
+
     by_wave = {}
     for sc in stack_changes:
         metadata = io_layer.read_yaml(f"{sc['stack']}/stack-metadata.yaml")

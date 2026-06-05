@@ -247,3 +247,22 @@ def test_guard_passes_when_no_existing_prs():
     io.find_prs_by_label.return_value = []
     # Should not raise.
     _guard_release_not_already_open("dummy-service-deadbeef0123", io)
+
+
+def test_wave_grouping_excludes_e2e_stacks():
+    waves = {
+        "dev-keboola-gcp-us-central1": 0,
+        "com-keboola-azure-north-europe": 1,
+        "kbc-us-east-1": 2,
+        "cloud-keboola-cs": 3,
+    }
+    io = Mock(); io.read_yaml.side_effect = _wave_metadata(waves)
+    config = Mock(); config.deploy_strategy = DeployStrategy.GRADUAL
+    plan = Mock(); plan.strategy = UpdateStrategy.PRODUCTION; plan.multi_stage = False
+    plan.helm_chart = "dummy-service"; plan.image_tag = "production-abc"
+    # an unlisted e2e stack must be dropped from waves, not placed in wave 3
+    changes = [_stack_change(s) for s in waves] + [_stack_change("foo-bar-e2e")]
+    groups = _group_changes_for_prs(changes, plan, config, io)
+    all_stacks = [s for g in groups for s in g["stacks"]]
+    assert "foo-bar-e2e" not in all_stacks
+    assert len(groups) == 4
