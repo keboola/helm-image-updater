@@ -75,6 +75,8 @@ def _execute_pr_plans(plan: UpdatePlan, io_layer: IOLayer, result: ExecutionResu
             print(f"  Base: {pr_plan.base_branch}")
             print(f"  Auto-merge: {pr_plan.auto_merge}")
             print(f"  Files: {', '.join(pr_plan.files_to_commit)}")
+            if pr_plan.labels:
+                print(f"  Labels: {', '.join(pr_plan.labels)}")
         else:
             # Step 1: Write files to disk first
             relevant_file_changes = [fc for fc in plan.file_changes 
@@ -89,7 +91,8 @@ def _execute_pr_plans(plan: UpdatePlan, io_layer: IOLayer, result: ExecutionResu
                 pr_title=pr_plan.pr_title,
                 pr_body=pr_plan.pr_body,
                 base_branch=pr_plan.base_branch,
-                auto_merge=pr_plan.auto_merge
+                auto_merge=pr_plan.auto_merge,
+                labels=pr_plan.labels,
             )
 
             if pr_url:

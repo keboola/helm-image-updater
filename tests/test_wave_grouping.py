@@ -199,3 +199,33 @@ def test_create_pr_plan_wave_sets_labels_and_branch_title():
 def test_wave_never_auto_merges_even_for_canary_strategy():
     plan = Mock(); plan.strategy = UpdateStrategy.CANARY
     assert _should_auto_merge(plan, "wave", user_requested=True) is False
+
+
+from helm_image_updater.io_layer import IOLayer
+from github.GithubException import GithubException
+
+
+def test_create_pull_request_provisions_and_applies_labels():
+    repo = Mock()
+    # get_label raises 404 for the dynamic release:id label, succeeds otherwise
+    def _get_label(name):
+        if name.startswith("release:id:"):
+            raise GithubException(404, {"message": "Not Found"}, None)
+        return Mock()
+    repo.get_label.side_effect = _get_label
+    pr = Mock(); pr.html_url = "http://x/1"; pr.number = 1
+    repo.create_pull.return_value = pr
+
+    io = IOLayer(Mock(), repo, dry_run=False, approve_github_repo=Mock())
+    io.push_branch = Mock()  # avoid real git push
+
+    io.create_pull_request(
+        title="t", body="b", branch_name="br", base_branch="main",
+        auto_merge=False,
+        labels=["release:id:dummy-service-deadbeef0123", "release:wave:2", "deploy:gradual"],
+    )
+
+    repo.create_label.assert_called()  # created the missing release:id label
+    pr.add_to_labels.assert_called_once_with(
+        "release:id:dummy-service-deadbeef0123", "release:wave:2", "deploy:gradual"
+    )
