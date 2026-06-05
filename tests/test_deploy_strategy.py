@@ -133,3 +133,31 @@ def test_release_id_distinct_for_distinct_tags():
     a = compute_release_id("connection", "production-aaaa")
     b = compute_release_id("connection", "production-bbbb")
     assert a != b
+
+
+# Task 5: resolve_wave
+from helm_image_updater.wave_planning import resolve_wave
+
+
+def test_resolve_wave_uses_explicit_value():
+    assert resolve_wave("kbc-us-east-1", {"rollout_wave": 2}) == 2
+
+
+def test_resolve_wave_dev_defaults_to_0_when_missing():
+    # dev-keboola-gcp-us-central1 is a dev stack (DEV_STACK_MAPPING)
+    assert resolve_wave("dev-keboola-gcp-us-central1", None) == 0
+    assert resolve_wave("dev-keboola-gcp-us-central1", {}) == 0
+
+
+def test_resolve_wave_non_dev_defaults_to_3_when_missing():
+    assert resolve_wave("kbc-us-east-1", None) == 3
+
+
+def test_resolve_wave_explicit_overrides_dev_default():
+    assert resolve_wave("dev-keboola-gcp-us-central1", {"rollout_wave": 1}) == 1
+
+
+def test_resolve_wave_rejects_out_of_range():
+    import pytest
+    with pytest.raises(ValueError):
+        resolve_wave("kbc-us-east-1", {"rollout_wave": 5})

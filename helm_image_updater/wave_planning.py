@@ -37,3 +37,14 @@ def wave_label(wave: int) -> str:
 
 def deploy_label(strategy: DeployStrategy) -> str:
     return f"deploy:{strategy.value}"
+
+
+def resolve_wave(stack: str, metadata: Optional[Dict]) -> int:
+    """wave(stack) = explicit `rollout_wave` if present (0..3), else dev->0 / other->3."""
+    if metadata and "rollout_wave" in metadata:
+        raw = metadata["rollout_wave"]
+        wave = int(raw)
+        if wave < 0 or wave > 3:
+            raise ValueError(f"rollout_wave for {stack} must be 0..3, got {raw}")
+        return wave
+    return 0 if classify_stack(stack).is_dev else 3
