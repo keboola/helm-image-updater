@@ -463,36 +463,14 @@ def _group_changes_for_prs(
         print(f"📊 Total PR groups created: {len(groups)}")
         return groups
     
-    # Default: one PR per stack or all in one
-    if len(stack_changes) == 1 or plan.strategy in (UpdateStrategy.DEV, UpdateStrategy.OVERRIDE):
-        # Single stack or dev or override: one PR
-        return [{
-            'stacks': [sc['stack'] for sc in stack_changes],
-            'changes': stack_changes,
-            'base_branch': 'main',
-            'pr_type': 'standard'
-        }]
-    
-    # Production without multi-stage: based on automerge
-    if config.automerge:
-        # One PR for all
-        return [{
-            'stacks': [sc['stack'] for sc in stack_changes],
-            'changes': stack_changes,
-            'base_branch': 'main',
-            'pr_type': 'standard'
-        }]
-    else:
-        # One PR per stack
-        return [
-            {
-                'stacks': [sc['stack']],
-                'changes': [sc],
-                'base_branch': 'main',
-                'pr_type': 'standard'
-            }
-            for sc in stack_changes
-        ]
+    # Production without multi-stage: a single PR regardless of automerge.
+    # (automerge=false now yields ONE unmerged PR, not one-per-stack.)
+    return [{
+        'stacks': [sc['stack'] for sc in stack_changes],
+        'changes': stack_changes,
+        'base_branch': 'main',
+        'pr_type': 'standard'
+    }]
 
 
 def _group_changes_by_wave(stack_changes, plan, config, io_layer):
