@@ -129,6 +129,14 @@ def test_cloud_multi_stage_sets_multi_stage_flag():
     cfg = EnvironmentConfig.from_env(_base_env(DEPLOY_STRATEGY="cloud_multi_stage"))
     assert cfg.deploy_strategy == DeployStrategy.CLOUD_MULTI_STAGE
     assert cfg.multi_stage is True
+
+
+def test_explicit_standard_overrides_multi_stage_flag():
+    # DEPLOY_STRATEGY=standard wins over MULTI_STAGE=true: multi_stage must be False
+    # (the warning says MULTI_STAGE is ignored — the flag must actually reflect that).
+    cfg = EnvironmentConfig.from_env(_base_env(DEPLOY_STRATEGY="standard", MULTI_STAGE="true"))
+    assert cfg.deploy_strategy == DeployStrategy.STANDARD
+    assert cfg.multi_stage is False
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -196,9 +204,12 @@ In `from_env`, before the `config = cls(...)` call, parse the raw value:
         elif multi_stage_raw:
             deploy_strategy = DeployStrategy.CLOUD_MULTI_STAGE
 
-        # Keep the legacy `multi_stage` flag in sync so the existing cloud×stage grouping
-        # branch (which keys off plan.multi_stage) fires for DEPLOY_STRATEGY=cloud_multi_stage too.
-        multi_stage = multi_stage_raw or (deploy_strategy == DeployStrategy.CLOUD_MULTI_STAGE)
+        # The resolved strategy is the SINGLE source of truth for multi_stage: an explicit
+        # DEPLOY_STRATEGY wins over MULTI_STAGE, and an unset DEPLOY_STRATEGY with
+        # MULTI_STAGE=true already resolved to CLOUD_MULTI_STAGE above. (Do NOT OR in
+        # multi_stage_raw — that would keep multi_stage=True for DEPLOY_STRATEGY=standard
+        # MULTI_STAGE=true, contradicting the "ignored" warning.)
+        multi_stage = deploy_strategy == DeployStrategy.CLOUD_MULTI_STAGE
 ```
 
 In the `cls(...)` constructor call, **replace** the existing
@@ -275,13 +286,30 @@ At the end of `validate()`, before `return errors`, add:
         if self.deploy_strategy.is_wave:
             if self.override_stack:
                 errors.append("DEPLOY_STRATEGY wave modes are incompatible with OVERRIDE_STACK")
-            elif self.image_tag:
+            elif not self.image_tag:
+                errors.append(
+                    f"DEPLOY_STRATEGY '{self.deploy_strategy.value}' requires a production/semver IMAGE_TAG"
+                )
+            else:
                 tag_type = detect_tag_type(self.image_tag)
                 if tag_type not in (TagType.PRODUCTION, TagType.SEMVER):
                     errors.append(
                         f"DEPLOY_STRATEGY '{self.deploy_strategy.value}' requires a production/semver "
                         f"IMAGE_TAG, got '{self.image_tag}'"
                     )
+```
+
+Add the matching test:
+
+```python
+# tests/test_deploy_strategy.py  (append)
+def test_wave_strategy_requires_image_tag_not_just_extra_tag():
+    cfg = EnvironmentConfig.from_env({
+        "HELM_CHART": "dummy-service", "GH_TOKEN": "t", "GH_APPROVE_TOKEN": "a",
+        "EXTRA_TAG1": "image.tag:production-abc", "DEPLOY_STRATEGY": "gradual",
+    })
+    errors = cfg.validate()
+    assert any("IMAGE_TAG" in e for e in errors)
 ```
 
 (`detect_tag_type` and `TagType` are already imported at the top of `validate()`.)
@@ -502,15 +530,21 @@ Expected: FAIL — `ImportError: cannot import name 'resolve_wave'`.
 
 ```python
 def resolve_wave(stack: str, metadata: Optional[Dict]) -> int:
-    """wave(stack) = explicit `rollout_wave` if present (0..3), else dev->0 / other->3."""
+    """wave(stack) = explicit `rollout_wave` if present (integer 0..3), else dev->0 / other->3."""
     if metadata and "rollout_wave" in metadata:
         raw = metadata["rollout_wave"]
-        wave = int(raw)
-        if wave < 0 or wave > 3:
+        # Reject non-integers (and bool, which is an int subclass) — silent coercion of a
+        # float/str/bool rollout_wave would mask a prod misconfiguration.
+        if isinstance(raw, bool) or not isinstance(raw, int):
+            raise ValueError(f"rollout_wave for {stack} must be an integer 0..3, got {raw!r}")
+        if raw < 0 or raw > 3:
             raise ValueError(f"rollout_wave for {stack} must be 0..3, got {raw}")
-        return wave
+        return raw
     return 0 if classify_stack(stack).is_dev else 3
 ```
+
+(Codex hardening — also add a test asserting `resolve_wave("kbc-us-east-1", {"rollout_wave": 1.9})` and
+`{"rollout_wave": True}` both raise `ValueError`.)
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -631,6 +665,8 @@ Then add the new function (next to `_group_changes_for_prs`):
 ```python
 def _group_changes_by_wave(stack_changes, plan, config, io_layer):
     """Group changes into one PR per rollout wave (0..3) for promoter consumption."""
+    # Never roll an e2e stack into a production wave (defensive — known e2e are also in EXCLUDED_STACKS).
+    stack_changes = [sc for sc in stack_changes if not sc['stack'].endswith('-e2e')]
     release_id = compute_release_id(plan.helm_chart, plan.image_tag)
     deploy_lbl = deploy_label(config.deploy_strategy)
 
@@ -792,7 +828,8 @@ Expected: FAIL — returns `True` (user_requested) for `pr_type='wave'`.
 
 - [ ] **Step 3: Add the wave rule in `_should_auto_merge`**
 
-After the canary check and before the `multi_stage_prod` check (line ~610):
+**Before** the canary check (so `pr_type=='wave'` is literal regardless of strategy — a wave PR is
+never auto-merged even if some future caller passes a non-production strategy):
 
 ```python
     if pr_type == 'wave':
@@ -1170,8 +1207,11 @@ After the `multi-stage` input (line ~18-20), add:
   deploy-strategy:
     description: 'Promoter deploy strategy: standard | cloud_multi_stage | gradual | critical | critical-manual-gate'
     required: false
-    default: 'standard'
+    default: ''
 ```
+> **Default is empty, NOT `standard`.** The action always forwards the input as `DEPLOY_STRATEGY`, and
+> `from_env` treats any non-empty value as *explicit* (overriding `MULTI_STAGE`). An empty default lets
+> legacy `multi-stage: true` callers keep aliasing to `cloud_multi_stage`; empty → unset → `standard`.
 
 - [ ] **Step 2: Map it to the `DEPLOY_STRATEGY` env var**
 

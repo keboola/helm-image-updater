@@ -93,7 +93,15 @@ There are **no nonsensical combinations**: `AUTOMERGE` is simply ignored where t
   (a typo like `gradul` with `AUTOMERGE=true` must not quietly merge everywhere).
 - `DEPLOY_STRATEGY ∈ {gradual, critical, critical-manual-gate}` requires a production/semver tag
   (`UpdateStrategy.PRODUCTION`). With a dev/canary tag or `OVERRIDE_STACK`, it is a config error
-  (`validate()` returns a message). `cloud_multi_stage` keeps today's production-only rule.
+  (`validate()` returns a message). Wave mode also requires `IMAGE_TAG` (not just an `EXTRA_TAG`).
+- `cloud_multi_stage` is production-only by the **same mechanism as today's `MULTI_STAGE`**: the
+  cloud×stage grouping only fires for a production strategy (the existing `strategy==PRODUCTION` guard
+  in grouping). There is **no new validation error** for `cloud_multi_stage` on a non-prod tag — that
+  would be stricter than today, which silently no-ops multi-stage for non-prod.
+- **Action input default is empty** (`deploy-strategy: ''`), not `standard`: the GitHub Action always
+  passes the input through, and a non-empty `DEPLOY_STRATEGY` is treated as *explicit* (overriding
+  `MULTI_STAGE`). An empty default lets legacy `multi-stage: true` callers keep aliasing to
+  `cloud_multi_stage`; `from_env` maps empty → unset → `standard`.
 
 ## 4. Wave→stack mapping: `rollout_wave`
 
@@ -159,7 +167,8 @@ PR #19 (`kacurez-grouping-strategy`) is **superseded** — we salvage only its c
   (`io_layer.py:240`). Both intermediate signatures currently take **no** `labels` arg — add it. In
   `create_pull_request()`: **provision** the labels (create-if-missing, §2) then **apply** them
   (`pr.add_to_labels`/`set_labels`) regardless of auto-merge; keep the existing auto-approve path. The
-  **dry-run** output (and `ExecutionResult`) must surface the labels that *would* be applied.
+  **dry-run** output prints the labels that *would* be applied (per PR). (No `ExecutionResult.labels`
+  field — nothing consumes it; the dry-run print is the observable output.)
 
 ## 6. Behavior changes vs today (explicit)
 
