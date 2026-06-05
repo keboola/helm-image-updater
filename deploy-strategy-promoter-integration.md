@@ -73,7 +73,7 @@ DEPLOY_STRATEGY = standard (default) | cloud_multi_stage | gradual | critical | 
 
 | `DEPLOY_STRATEGY` | grouping | `AUTOMERGE=true` | `AUTOMERGE=false` / unset | promoter labels |
 |---|---|---|---|---|
-| **standard** (default) | **single PR**, all target stacks | merge the 1 PR | **1 PR, unmerged** (auto-approved) | none |
+| **standard** (default) | single PR — except prod + `AUTOMERGE=false` → **per-stack** | merge the 1 PR | **per-stack** unmerged PRs, auto-approved (dev / single-stack / override → 1 PR) | none |
 | **cloud_multi_stage** | cloud×stage PRs (≤6) | dev PRs merge, prod PRs never | all unmerged | none |
 | **gradual / critical / critical-manual-gate** | per-wave PRs (0–3) | *(ignored)* — promoter merges all | promoter merges all | `release:id` · `release:wave:N` · `deploy:<strategy>` |
 
@@ -84,7 +84,7 @@ There are **no nonsensical combinations**: `AUTOMERGE` is simply ignored where t
 - Wave mode **ignores `AUTOMERGE`** — promoter merges all waves incl. wave 0. (Auto-merging wave 0 in
   HIU would bypass promoter's per-app FIFO gate, so two concurrent same-app releases could hit dev out
   of order. Deferred as a possible explicit opt-in later.)
-- `standard` + `AUTOMERGE=false` → **one unmerged PR** (not per-stack). See §6 (behavior change).
+- `standard` keeps today's HIU grouping (no change): `AUTOMERGE=true` / dev / single-stack / override → one PR; prod + `AUTOMERGE=false` → one PR **per stack**.
 - `MULTI_STAGE=true` becomes a **deprecated alias** for `DEPLOY_STRATEGY=cloud_multi_stage`
   (behavior identical). If both are set and disagree, `DEPLOY_STRATEGY` wins + a warning is logged.
 
@@ -151,8 +151,8 @@ PR #19 (`kacurez-grouping-strategy`) is **superseded** — we salvage only its c
   wave-mode-requires-prod-tag validation.
 - **`plan_builder.py`**: replace the strategy-tangled `_group_changes_for_prs()` (lines 401–490) with a
   small dispatch keyed on `config.deploy_strategy`:
-  - `STANDARD` → single PR (all target stacks), `pr_type='standard'`. *(automerge=false now → still one
-    PR, just unmerged.)*
+  - `STANDARD` → today's HIU grouping, unchanged (`pr_type='standard'`): one PR for `automerge=true` /
+    dev / single-stack / override; one PR **per stack** for prod + `automerge=false`.
   - `CLOUD_MULTI_STAGE` → today's cloud×stage grouping (moved verbatim), `pr_type='multi_stage_{dev|prod}'`.
   - `GRADUAL|CRITICAL|CRITICAL_MANUAL_GATE` → one group per wave `w` with ≥1 change, `pr_type='wave'`,
     plus `wave_number=w`, `release_id`, and `labels=[release:id:…, release:wave:w, deploy:…]`.
@@ -175,7 +175,7 @@ PR #19 (`kacurez-grouping-strategy`) is **superseded** — we salvage only its c
 | Path | Today | After |
 |---|---|---|
 | `standard` + `AUTOMERGE=true` (prod) | single PR, merged | **unchanged** |
-| `standard` + `AUTOMERGE=false` (prod) | **per-stack** PRs (≈20) | **one unmerged PR** ⚠️ |
+| `standard` + `AUTOMERGE=false` (prod) | **per-stack** PRs | **unchanged** |
 | dev tag | single PR, merged | **unchanged** |
 | canary | single PR, merged | **unchanged** |
 | `MULTI_STAGE=true` | cloud×stage | **unchanged** (now via `cloud_multi_stage` alias) |

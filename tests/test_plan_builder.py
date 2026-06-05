@@ -323,8 +323,12 @@ def test_multi_cloud_grouping_dev_strategy(test_stacks):
 
 # Override removal tests
 
-def test_standard_production_automerge_false_is_single_pr():
-    """standard + automerge=false now produces ONE unmerged PR (was per-stack)."""
+def test_standard_production_automerge_false_is_one_pr_per_stack():
+    """standard production + automerge=false → ONE PR PER STACK (matches main).
+
+    (automerge=true stays a single PR for all stacks — see
+    test_multi_cloud_grouping_non_multi_stage.)
+    """
     from helm_image_updater.plan_builder import _group_changes_for_prs
     from helm_image_updater.models import DeployStrategy
 
@@ -342,9 +346,10 @@ def test_standard_production_automerge_false_is_single_pr():
 
     groups = _group_changes_for_prs(stack_changes, mock_plan, mock_config, mock_io_layer)
 
-    assert len(groups) == 1
-    assert len(groups[0]["stacks"]) == 3
-    assert groups[0]["pr_type"] == "standard"
+    assert len(groups) == 3, f"expected one PR per stack, got {len(groups)}"
+    assert all(len(g["stacks"]) == 1 for g in groups)
+    assert {g["stacks"][0] for g in groups} == set(stacks)
+    assert all(g["pr_type"] == "standard" for g in groups)
 
 
 class TestCheckAndRemoveOverride:
