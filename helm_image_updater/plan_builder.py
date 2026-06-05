@@ -626,7 +626,11 @@ def _should_auto_merge(plan: UpdatePlan, pr_type: str, user_requested: bool) -> 
     if plan.strategy == UpdateStrategy.CANARY:
         print(f"       - result: TRUE (canary always auto-merges)")
         return True  # Always auto-merge canary
-    
+
+    if pr_type == 'wave':
+        print(f"       - result: FALSE (wave PRs are merged by release-promoter)")
+        return False
+
     if pr_type == 'multi_stage_prod':
         print(f"       - result: FALSE (multi-stage prod never auto-merges)")
         return False  # Never auto-merge multi-stage production

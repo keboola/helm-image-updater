@@ -86,6 +86,15 @@ def test_wave_grouping_requires_all_waves_0_to_3():
         _group_changes_for_prs([_stack_change(s) for s in waves], plan, config, io)
 
 
+from helm_image_updater.plan_builder import _should_auto_merge
+
+
+def test_wave_pr_type_never_auto_merges():
+    plan = Mock(); plan.strategy = UpdateStrategy.PRODUCTION
+    assert _should_auto_merge(plan, "wave", user_requested=True) is False
+    assert _should_auto_merge(plan, "wave", user_requested=False) is False
+
+
 def test_wave_grouping_rejects_gap():
     """waves {0,1,3} (no wave-2 stack) → RuntimeError."""
     import pytest
