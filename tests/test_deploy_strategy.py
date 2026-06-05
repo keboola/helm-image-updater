@@ -93,3 +93,19 @@ def test_prplan_labels_can_be_set():
         labels=["release:wave:0"],
     )
     assert p.labels == ["release:wave:0"]
+
+
+def test_explicit_standard_overrides_multi_stage_flag():
+    # DEPLOY_STRATEGY=standard wins over MULTI_STAGE=true: multi_stage must be False.
+    cfg = EnvironmentConfig.from_env(_base_env(DEPLOY_STRATEGY="standard", MULTI_STAGE="true"))
+    assert cfg.deploy_strategy == DeployStrategy.STANDARD
+    assert cfg.multi_stage is False
+
+
+def test_wave_strategy_requires_image_tag_not_just_extra_tag():
+    cfg = EnvironmentConfig.from_env({
+        "HELM_CHART": "dummy-service", "GH_TOKEN": "t", "GH_APPROVE_TOKEN": "a",
+        "EXTRA_TAG1": "image.tag:production-abc", "DEPLOY_STRATEGY": "gradual",
+    })
+    errors = cfg.validate()
+    assert any("IMAGE_TAG" in e for e in errors)

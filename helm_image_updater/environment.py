@@ -85,7 +85,7 @@ class EnvironmentConfig:
 
         # Keep the legacy `multi_stage` flag in sync so the existing cloud×stage grouping
         # branch (which keys off plan.multi_stage) fires for DEPLOY_STRATEGY=cloud_multi_stage too.
-        multi_stage = multi_stage_raw or (deploy_strategy == DeployStrategy.CLOUD_MULTI_STAGE)
+        multi_stage = deploy_strategy == DeployStrategy.CLOUD_MULTI_STAGE
 
         config = cls(
             helm_chart=env.get("HELM_CHART", ""),
@@ -171,7 +171,11 @@ class EnvironmentConfig:
         if self.deploy_strategy.is_wave:
             if self.override_stack:
                 errors.append("DEPLOY_STRATEGY wave modes are incompatible with OVERRIDE_STACK")
-            elif self.image_tag:
+            elif not self.image_tag:
+                errors.append(
+                    f"DEPLOY_STRATEGY '{self.deploy_strategy.value}' requires a production/semver IMAGE_TAG"
+                )
+            else:
                 tag_type = detect_tag_type(self.image_tag)
                 if tag_type not in (TagType.PRODUCTION, TagType.SEMVER):
                     errors.append(
