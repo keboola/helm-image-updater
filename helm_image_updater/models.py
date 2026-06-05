@@ -60,6 +60,7 @@ class PRPlan:
     auto_merge: bool
     files_to_commit: List[str]  # List of file paths that will be committed
     commit_message: str
+    labels: List[str] = field(default_factory=list)
     
     
 @dataclass

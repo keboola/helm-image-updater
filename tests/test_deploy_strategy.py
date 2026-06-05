@@ -73,3 +73,23 @@ def test_wave_strategy_rejected_with_override_stack():
     )
     errors = cfg.validate()
     assert any("OVERRIDE_STACK" in e for e in errors)
+
+
+from helm_image_updater.models import PRPlan
+
+
+def test_prplan_labels_defaults_empty():
+    p = PRPlan(
+        branch_name="b", pr_title="t", pr_body="body", base_branch="main",
+        auto_merge=False, files_to_commit=[], commit_message="c",
+    )
+    assert p.labels == []
+
+
+def test_prplan_labels_can_be_set():
+    p = PRPlan(
+        branch_name="b", pr_title="t", pr_body="body", base_branch="main",
+        auto_merge=False, files_to_commit=[], commit_message="c",
+        labels=["release:wave:0"],
+    )
+    assert p.labels == ["release:wave:0"]
