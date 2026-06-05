@@ -161,3 +161,36 @@ def test_wave_grouping_missing_metadata_uses_defaults():
     assert set(by_wave) == {0, 1, 2, 3}
     # The dev stack must have landed in wave 0
     assert dev_stack in by_wave[0]["stacks"]
+
+
+from helm_image_updater.plan_builder import _create_pr_plan
+
+
+def test_create_pr_plan_wave_sets_labels_and_branch_title():
+    config = Mock(); config.automerge = False
+    config.deploy_strategy = DeployStrategy.GRADUAL
+    plan = Mock()
+    plan.strategy = UpdateStrategy.PRODUCTION
+    plan.multi_stage = False
+    plan.helm_chart = "dummy-service"
+    plan.image_tag = "production-abc123"
+    plan.extra_tags = []
+    plan.metadata = {}
+
+    fc = Mock(); fc.file_path = "kbc-us-east-1/dummy-service/tag.yaml"
+    group = {
+        'stacks': ["kbc-us-east-1"],
+        'changes': [{"stack": "kbc-us-east-1", "file_change": fc, "changes": []}],
+        'base_branch': 'main',
+        'pr_type': 'wave',
+        'wave_number': 2,
+        'release_id': 'dummy-service-deadbeef0123',
+        'labels': ["release:id:dummy-service-deadbeef0123", "release:wave:2", "deploy:gradual"],
+    }
+
+    pr_plan = _create_pr_plan(group, plan, config)
+
+    assert pr_plan.labels == group['labels']
+    assert pr_plan.auto_merge is False
+    assert "wave2" in pr_plan.branch_name
+    assert "wave 2" in pr_plan.pr_title

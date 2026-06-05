@@ -529,6 +529,9 @@ def _create_pr_plan(pr_group: Dict[str, Any], plan: UpdatePlan, config: Environm
     elif pr_type == 'canary':
         # Canary: dummy-service-canary-canary-tag-abc1
         branch_name = f"{plan.helm_chart}-canary-{plan.image_tag}-{suffix}"
+    elif pr_type == 'wave':
+        wave = pr_group['wave_number']
+        branch_name = f"{plan.helm_chart}-wave{wave}-{plan.image_tag}-{suffix}"
     else:
         # Standard: dummy-service-production-tag-abc1
         branch_name = f"{plan.helm_chart}-{plan.image_tag}-{suffix}"
@@ -544,23 +547,28 @@ def _create_pr_plan(pr_group: Dict[str, Any], plan: UpdatePlan, config: Environm
         target_stacks=pr_group['stacks']
     )
     
-    # Generate PR title prefix
-    pr_title_prefix = generate_pr_title_prefix(
-        strategy=plan.strategy,
-        is_multi_stage=plan.multi_stage,
-        user_requested_automerge=config.automerge,
-        target_stacks=pr_group['stacks'],
-        cloud_provider=pr_group.get('cloud_provider')
-    )
-    
     # Generate PR title
-    pr_title = generate_pr_title(
-        pr_title_prefix=pr_title_prefix,
-        helm_chart=plan.helm_chart,
-        image_tag=plan.image_tag,
-        extra_tags=plan.extra_tags,
-        target_stacks=pr_group['stacks']
-    )
+    if pr_type == 'wave':
+        wave = pr_group['wave_number']
+        pr_title = (
+            f"[{plan.helm_chart} {config.deploy_strategy.value} wave {wave}] "
+            f"{plan.helm_chart}@{plan.image_tag}"
+        )
+    else:
+        pr_title_prefix = generate_pr_title_prefix(
+            strategy=plan.strategy,
+            is_multi_stage=plan.multi_stage,
+            user_requested_automerge=config.automerge,
+            target_stacks=pr_group['stacks'],
+            cloud_provider=pr_group.get('cloud_provider')
+        )
+        pr_title = generate_pr_title(
+            pr_title_prefix=pr_title_prefix,
+            helm_chart=plan.helm_chart,
+            image_tag=plan.image_tag,
+            extra_tags=plan.extra_tags,
+            target_stacks=pr_group['stacks']
+        )
     
     # Collect removed overrides for PR body
     removed_overrides = []
@@ -601,7 +609,8 @@ def _create_pr_plan(pr_group: Dict[str, Any], plan: UpdatePlan, config: Environm
         base_branch=pr_group['base_branch'],
         auto_merge=auto_merge,
         files_to_commit=files_to_commit,
-        commit_message=commit_message
+        commit_message=commit_message,
+        labels=pr_group.get('labels', []),
     )
 
 
