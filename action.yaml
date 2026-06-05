@@ -22,7 +22,7 @@ inputs:
   deploy-strategy:
     description: 'Promoter deploy strategy: standard | cloud_multi_stage | gradual | critical | critical-manual-gate'
     required: false
-    default: 'standard'
+    default: ''
   commit-sha:
     description: 'Store commit SHA in tag.yaml'
     required: false

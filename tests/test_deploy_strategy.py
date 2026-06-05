@@ -169,3 +169,11 @@ def test_resolve_wave_rejects_non_integer():
         resolve_wave("kbc-us-east-1", {"rollout_wave": 1.9})
     with pytest.raises(ValueError):
         resolve_wave("kbc-us-east-1", {"rollout_wave": True})
+
+
+def test_empty_deploy_strategy_with_multi_stage_aliases_to_cloud_multi_stage():
+    # The action passes deploy-strategy='' by default; empty must behave as unset
+    # so MULTI_STAGE=true still aliases to cloud_multi_stage (legacy action callers).
+    cfg = EnvironmentConfig.from_env(_base_env(DEPLOY_STRATEGY="", MULTI_STAGE="true"))
+    assert cfg.deploy_strategy == DeployStrategy.CLOUD_MULTI_STAGE
+    assert cfg.multi_stage is True
