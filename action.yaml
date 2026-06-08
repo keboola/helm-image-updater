@@ -19,6 +19,10 @@ inputs:
     description: 'Enable multi-stage deployment'
     required: false
     default: 'false'
+  deploy-strategy:
+    description: 'Promoter deploy strategy: standard | cloud_multi_stage | gradual | critical | critical-manual-gate'
+    required: false
+    default: ''
   commit-sha:
     description: 'Store commit SHA in tag.yaml'
     required: false
@@ -89,9 +93,10 @@ runs:
         AUTOMERGE: ${{ inputs.automerge }}
         DRY_RUN: ${{ inputs.dry-run }}
         MULTI_STAGE: ${{ inputs.multi-stage }}
+        DEPLOY_STRATEGY: ${{ inputs.deploy-strategy }}
         EXTRA_TAG1: ${{ inputs.extra-tag1 }}
         EXTRA_TAG2: ${{ inputs.extra-tag2 }}
-        OVERRIDE_STACK: ${{ inputs.override-stack }}        
+        OVERRIDE_STACK: ${{ inputs.override-stack }}
         METADATA: ${{ inputs.metadata }}
         GH_TOKEN: ${{ inputs.github-token }}
         GH_APPROVE_TOKEN: ${{ inputs.approve-token }}

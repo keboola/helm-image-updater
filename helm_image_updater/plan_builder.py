@@ -10,7 +10,8 @@ from ruamel.yaml import YAML, YAMLError
 _ryaml = YAML()
 _ryaml.preserve_quotes = True
 
-from .models import UpdatePlan, FileChange, PRPlan, UpdateStrategy, TagChange
+from .models import UpdatePlan, FileChange, PRPlan, UpdateStrategy, TagChange, DeployStrategy
+from .wave_planning import compute_release_id, release_id_label, wave_label, deploy_label, resolve_wave
 from .environment import EnvironmentConfig
 from .io_layer import IOLayer
 from .tag_classification import detect_tag_type, TagType
@@ -86,7 +87,11 @@ def prepare_plan(config: EnvironmentConfig, io_layer: IOLayer) -> UpdatePlan:
     
     # Group changes into PRs
     pr_groups = _group_changes_for_prs(stack_changes, plan, config, io_layer)
-    
+
+    # Idempotency: in wave mode, never fan out a duplicate release.
+    if config.deploy_strategy.is_wave and not config.dry_run and pr_groups:
+        _guard_release_not_already_open(pr_groups[0]['release_id'], io_layer)
+
     # Create PR plans
     for pr_group in pr_groups:
         pr_plan = _create_pr_plan(pr_group, plan, config)
@@ -405,7 +410,11 @@ def _group_changes_for_prs(
     io_layer: IOLayer
 ) -> List[Dict[str, Any]]:
     """Group changes into pull requests based on strategy."""
-    
+
+    # Promoter-managed wave strategies: one PR per wave (0..3), unmerged, labeled.
+    if config.deploy_strategy.is_wave:
+        return _group_changes_by_wave(stack_changes, plan, config, io_layer)
+
     if plan.strategy == UpdateStrategy.CANARY:
         # Canary: always one PR
         return [{
@@ -467,7 +476,7 @@ def _group_changes_for_prs(
             'base_branch': 'main',
             'pr_type': 'standard'
         }]
-    
+
     # Production without multi-stage: based on automerge
     if config.automerge:
         # One PR for all
@@ -490,6 +499,60 @@ def _group_changes_for_prs(
         ]
 
 
+def _group_changes_by_wave(stack_changes, plan, config, io_layer):
+    """Group changes into one PR per rollout wave (0..3) for promoter consumption."""
+    release_id = compute_release_id(plan.helm_chart, plan.image_tag)
+    deploy_lbl = deploy_label(config.deploy_strategy)
+
+    # Never roll an e2e stack into a production wave (defensive — known e2e are also in EXCLUDED_STACKS).
+    stack_changes = [sc for sc in stack_changes if not sc['stack'].endswith('-e2e')]
+
+    by_wave = {}
+    for sc in stack_changes:
+        metadata = io_layer.read_yaml(f"{sc['stack']}/stack-metadata.yaml")
+        wave = resolve_wave(sc['stack'], metadata)
+        by_wave.setdefault(wave, []).append(sc)
+
+    present = set(by_wave)
+    required = {0, 1, 2, 3}
+    if present != required:
+        missing = sorted(required - present)
+        raise RuntimeError(
+            f"Wave deploy requires non-empty waves 0..3 (promoter needs a contiguous "
+            f"release:wave:0..3); missing/empty waves: {missing}. "
+            f"Check rollout_wave in stack-metadata.yaml across target stacks."
+        )
+
+    groups = []
+    for wave in sorted(by_wave):
+        changes = by_wave[wave]
+        groups.append({
+            'stacks': [sc['stack'] for sc in changes],
+            'changes': changes,
+            'base_branch': 'main',
+            'pr_type': 'wave',
+            'wave_number': wave,
+            'release_id': release_id,
+            'labels': [release_id_label(release_id), wave_label(wave), deploy_lbl],
+        })
+    return groups
+
+
+def _guard_release_not_already_open(release_id: str, io_layer: IOLayer) -> None:
+    """Fail loudly if a release with this id already has open PRs (re-run safety).
+
+    Creating a second set of wave PRs with the same release:id would give promoter
+    duplicate release:wave:N labels -> ¬wellFormed -> Conflicted.
+    """
+    existing = io_layer.find_prs_by_label(release_id_label(release_id))
+    if existing:
+        raise RuntimeError(
+            f"Release '{release_id}' already has open PRs {existing}. "
+            f"Refusing to create duplicate wave PRs (would make the release Conflicted). "
+            f"Close/finish the existing release first."
+        )
+
+
 def _create_pr_plan(pr_group: Dict[str, Any], plan: UpdatePlan, config: EnvironmentConfig) -> PRPlan:
     """Create a PR plan from a group of changes."""
     import random
@@ -510,6 +573,9 @@ def _create_pr_plan(pr_group: Dict[str, Any], plan: UpdatePlan, config: Environm
     elif pr_type == 'canary':
         # Canary: dummy-service-canary-canary-tag-abc1
         branch_name = f"{plan.helm_chart}-canary-{plan.image_tag}-{suffix}"
+    elif pr_type == 'wave':
+        wave = pr_group['wave_number']
+        branch_name = f"{plan.helm_chart}-wave{wave}-{plan.image_tag}-{suffix}"
     else:
         # Standard: dummy-service-production-tag-abc1
         branch_name = f"{plan.helm_chart}-{plan.image_tag}-{suffix}"
@@ -525,23 +591,28 @@ def _create_pr_plan(pr_group: Dict[str, Any], plan: UpdatePlan, config: Environm
         target_stacks=pr_group['stacks']
     )
     
-    # Generate PR title prefix
-    pr_title_prefix = generate_pr_title_prefix(
-        strategy=plan.strategy,
-        is_multi_stage=plan.multi_stage,
-        user_requested_automerge=config.automerge,
-        target_stacks=pr_group['stacks'],
-        cloud_provider=pr_group.get('cloud_provider')
-    )
-    
     # Generate PR title
-    pr_title = generate_pr_title(
-        pr_title_prefix=pr_title_prefix,
-        helm_chart=plan.helm_chart,
-        image_tag=plan.image_tag,
-        extra_tags=plan.extra_tags,
-        target_stacks=pr_group['stacks']
-    )
+    if pr_type == 'wave':
+        wave = pr_group['wave_number']
+        pr_title = (
+            f"[{plan.helm_chart} {config.deploy_strategy.value} wave {wave}] "
+            f"{plan.helm_chart}@{plan.image_tag}"
+        )
+    else:
+        pr_title_prefix = generate_pr_title_prefix(
+            strategy=plan.strategy,
+            is_multi_stage=plan.multi_stage,
+            user_requested_automerge=config.automerge,
+            target_stacks=pr_group['stacks'],
+            cloud_provider=pr_group.get('cloud_provider')
+        )
+        pr_title = generate_pr_title(
+            pr_title_prefix=pr_title_prefix,
+            helm_chart=plan.helm_chart,
+            image_tag=plan.image_tag,
+            extra_tags=plan.extra_tags,
+            target_stacks=pr_group['stacks']
+        )
     
     # Collect removed overrides for PR body
     removed_overrides = []
@@ -582,7 +653,8 @@ def _create_pr_plan(pr_group: Dict[str, Any], plan: UpdatePlan, config: Environm
         base_branch=pr_group['base_branch'],
         auto_merge=auto_merge,
         files_to_commit=files_to_commit,
-        commit_message=commit_message
+        commit_message=commit_message,
+        labels=pr_group.get('labels', []),
     )
 
 
@@ -604,10 +676,14 @@ def _should_auto_merge(plan: UpdatePlan, pr_type: str, user_requested: bool) -> 
     print(f"       - pr_type: {pr_type}")
     print(f"       - user_requested: {user_requested}")
     
+    if pr_type == 'wave':
+        print(f"       - result: FALSE (wave PRs are merged by release-promoter)")
+        return False
+
     if plan.strategy == UpdateStrategy.CANARY:
         print(f"       - result: TRUE (canary always auto-merges)")
         return True  # Always auto-merge canary
-    
+
     if pr_type == 'multi_stage_prod':
         print(f"       - result: FALSE (multi-stage prod never auto-merges)")
         return False  # Never auto-merge multi-stage production

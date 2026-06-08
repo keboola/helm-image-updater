@@ -363,7 +363,7 @@ def test_canary_tag_update(cli_test_env, capsys):
     # Mock create_pr to track PRs created
     created_prs = []
 
-    def mock_create_branch_commit_and_pr(self, branch_name, files_to_commit, commit_message, pr_title, pr_body, base_branch="main", auto_merge=False):
+    def mock_create_branch_commit_and_pr(self, branch_name, files_to_commit, commit_message, pr_title, pr_body, base_branch="main", auto_merge=False, labels=None):
         """Mock PR creation to track PR details."""
         created_prs.append({"branch": branch_name, "title": pr_title, "base": base_branch})
         print(f"Created PR: {pr_title} (branch: {branch_name}, base: {base_branch})")
@@ -615,7 +615,7 @@ def test_valid_extra_tag_formats(cli_test_env, capsys):
     # Track PRs
     created_prs = []
 
-    def mock_create_branch_commit_and_pr(self, branch_name, files_to_commit, commit_message, pr_title, pr_body, base_branch="main", auto_merge=False):
+    def mock_create_branch_commit_and_pr(self, branch_name, files_to_commit, commit_message, pr_title, pr_body, base_branch="main", auto_merge=False, labels=None):
         """Mock PR creation to track PR details."""
         created_prs.append({"branch": branch_name, "title": pr_title, "base": base_branch})
         print(f"Created PR: {pr_title} (branch: {branch_name}, base: {base_branch})")
@@ -682,7 +682,7 @@ def test_nonexistent_stack_override(cli_test_env, capsys):
     # Track PRs
     created_prs = []
 
-    def mock_create_branch_commit_and_pr(self, branch_name, files_to_commit, commit_message, pr_title, pr_body, base_branch="main", auto_merge=False):
+    def mock_create_branch_commit_and_pr(self, branch_name, files_to_commit, commit_message, pr_title, pr_body, base_branch="main", auto_merge=False, labels=None):
         created_prs.append({"branch": branch_name, "title": pr_title, "base": base_branch})
 
     # Only mock create_pr, use real config
@@ -727,7 +727,7 @@ def test_multi_cloud_multi_stage_automerge_true(cli_test_env, capsys):
     # Track PRs with their automerge setting
     created_prs = []
 
-    def mock_create_branch_commit_and_pr(self, branch_name, files_to_commit, commit_message, pr_title, pr_body, base_branch="main", auto_merge=False):
+    def mock_create_branch_commit_and_pr(self, branch_name, files_to_commit, commit_message, pr_title, pr_body, base_branch="main", auto_merge=False, labels=None):
         created_prs.append(
             {
                 "branch": branch_name,
@@ -819,7 +819,7 @@ def test_multi_cloud_multi_stage_automerge_false(cli_test_env, capsys):
     # Track PRs with their automerge setting
     created_prs = []
 
-    def mock_create_branch_commit_and_pr(self, branch_name, files_to_commit, commit_message, pr_title, pr_body, base_branch="main", auto_merge=False):
+    def mock_create_branch_commit_and_pr(self, branch_name, files_to_commit, commit_message, pr_title, pr_body, base_branch="main", auto_merge=False, labels=None):
         created_prs.append(
             {
                 "branch": branch_name,
@@ -950,7 +950,7 @@ def test_custom_tag_with_override_stack(cli_test_env, capsys):
     # Track PRs
     created_prs = []
 
-    def mock_create_branch_commit_and_pr(self, branch_name, files_to_commit, commit_message, pr_title, pr_body, base_branch="main", auto_merge=False):
+    def mock_create_branch_commit_and_pr(self, branch_name, files_to_commit, commit_message, pr_title, pr_body, base_branch="main", auto_merge=False, labels=None):
         """Mock PR creation to track PR details."""
         created_prs.append({"branch": branch_name, "title": pr_title, "base": base_branch})
         print(f"Created PR: {pr_title} (branch: {branch_name}, base: {base_branch})")
@@ -1003,7 +1003,7 @@ def test_dev_tag_with_production_override_stack(cli_test_env, capsys):
     # Track PRs
     created_prs = []
 
-    def mock_create_branch_commit_and_pr(self, branch_name, files_to_commit, commit_message, pr_title, pr_body, base_branch="main", auto_merge=False):
+    def mock_create_branch_commit_and_pr(self, branch_name, files_to_commit, commit_message, pr_title, pr_body, base_branch="main", auto_merge=False, labels=None):
         """Mock PR creation to track PR details."""
         created_prs.append({"branch": branch_name, "title": pr_title, "base": base_branch})
         print(f"Created PR: {pr_title} (branch: {branch_name}, base: {base_branch})")
@@ -1125,7 +1125,7 @@ def test_semver_main_image_tag(cli_test_env, capsys):
     # Track PRs
     created_prs = []
 
-    def mock_create_branch_commit_and_pr(self, branch_name, files_to_commit, commit_message, pr_title, pr_body, base_branch="main", auto_merge=False):
+    def mock_create_branch_commit_and_pr(self, branch_name, files_to_commit, commit_message, pr_title, pr_body, base_branch="main", auto_merge=False, labels=None):
         """Mock PR creation to track PR details."""
         created_prs.append({"branch": branch_name, "title": pr_title, "base": base_branch})
         print(f"Created PR: {pr_title} (branch: {branch_name}, base: {base_branch})")
@@ -1220,7 +1220,7 @@ def test_canary_tag_in_extra_tag_should_update_canary_stack(cli_test_env, mock_g
     # Mock create_pr to track PRs created
     created_prs = []
 
-    def mock_create_branch_commit_and_pr(self, branch_name, files_to_commit, commit_message, pr_title, pr_body, base_branch="main", auto_merge=False):
+    def mock_create_branch_commit_and_pr(self, branch_name, files_to_commit, commit_message, pr_title, pr_body, base_branch="main", auto_merge=False, labels=None):
         """Mock PR creation to track PR details."""
         created_prs.append({
             "branch": branch_name,

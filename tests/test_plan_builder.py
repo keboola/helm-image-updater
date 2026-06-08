@@ -184,7 +184,9 @@ def test_multi_cloud_multi_stage_grouping_production_tag(test_stacks):
     # Create mock environment config
     mock_config = Mock()
     mock_config.automerge = True
-    
+    from helm_image_updater.models import DeployStrategy
+    mock_config.deploy_strategy = DeployStrategy.STANDARD
+
     # Create mock plan
     mock_plan = Mock()
     mock_plan.multi_stage = True
@@ -244,7 +246,9 @@ def test_multi_cloud_grouping_non_multi_stage(test_stacks):
     # Create mock environment config
     mock_config = Mock()
     mock_config.automerge = True
-    
+    from helm_image_updater.models import DeployStrategy
+    mock_config.deploy_strategy = DeployStrategy.STANDARD
+
     # Create mock plan (non-multi-stage)
     mock_plan = Mock()
     mock_plan.multi_stage = False  # Non-multi-stage
@@ -287,7 +291,9 @@ def test_multi_cloud_grouping_dev_strategy(test_stacks):
     # Create mock environment config
     mock_config = Mock()
     mock_config.automerge = True
-    
+    from helm_image_updater.models import DeployStrategy
+    mock_config.deploy_strategy = DeployStrategy.STANDARD
+
     # Create mock plan (dev strategy, even with multi_stage=True)
     mock_plan = Mock()
     mock_plan.multi_stage = True
@@ -316,6 +322,35 @@ def test_multi_cloud_grouping_dev_strategy(test_stacks):
 
 
 # Override removal tests
+
+def test_standard_production_automerge_false_is_one_pr_per_stack():
+    """standard production + automerge=false → ONE PR PER STACK (matches main).
+
+    (automerge=true stays a single PR for all stacks — see
+    test_multi_cloud_grouping_non_multi_stage.)
+    """
+    from helm_image_updater.plan_builder import _group_changes_for_prs
+    from helm_image_updater.models import DeployStrategy
+
+    mock_io_layer = Mock()
+    mock_config = Mock()
+    mock_config.automerge = False
+    mock_config.deploy_strategy = DeployStrategy.STANDARD
+
+    mock_plan = Mock()
+    mock_plan.multi_stage = False
+    mock_plan.strategy = UpdateStrategy.PRODUCTION
+
+    stacks = ["com-keboola-gcp-prod", "com-keboola-azure-prod", "com-keboola-aws-prod"]
+    stack_changes = [{"stack": s, "file_change": Mock(), "changes": []} for s in stacks]
+
+    groups = _group_changes_for_prs(stack_changes, mock_plan, mock_config, mock_io_layer)
+
+    assert len(groups) == 3, f"expected one PR per stack, got {len(groups)}"
+    assert all(len(g["stacks"]) == 1 for g in groups)
+    assert {g["stacks"][0] for g in groups} == set(stacks)
+    assert all(g["pr_type"] == "standard" for g in groups)
+
 
 class TestCheckAndRemoveOverride:
     """Tests for _check_and_remove_override function."""

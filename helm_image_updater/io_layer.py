@@ -243,34 +243,38 @@ class IOLayer:
         body: str,
         branch_name: str,
         base_branch: str = "main",
-        auto_merge: bool = False
+        auto_merge: bool = False,
+        labels: Optional[List[str]] = None,
     ) -> Optional[str]:
         """Create a GitHub pull request.
-        
+
         Args:
             title: PR title
             body: PR body/description
             branch_name: Head branch name
             base_branch: Base branch name
             auto_merge: If True, attempt to auto-merge
-            
+            labels: Optional labels to provision (create-if-missing) and apply
+
         Returns:
             PR URL if created, None if dry run
         """
         print(f"🚀 Creating PR: '{title}'")
         print(f"   - Base: {base_branch}, Head: {branch_name}")
         print(f"   - Auto-merge requested: {'YES' if auto_merge else 'NO'}")
-        
+
         if self.dry_run:
             merge_status = "and auto-merge" if auto_merge else "without auto-merge"
             print(f"[DRY RUN] Would create PR: '{title}' {merge_status}")
             print(f"[DRY RUN] Base: {base_branch}, Head: {branch_name}")
+            if labels:
+                print(f"[DRY RUN] Labels: {', '.join(labels)}")
             print(f"[DRY RUN] Body:\n{body}")
             return None
-        
+
         # Push the branch first
         self.push_branch(branch_name)
-        
+
         # Create the PR
         pr = self.github_repo.create_pull(
             title=title,
@@ -278,9 +282,14 @@ class IOLayer:
             head=branch_name,
             base=base_branch
         )
-        
+
         print(f"PR created: {pr.html_url}")
-        
+
+        if labels:
+            self._ensure_labels_exist(labels)
+            pr.add_to_labels(*labels)
+            print(f"🏷️  Applied labels: {', '.join(labels)}")
+
         # Auto-merge if requested
         if auto_merge:
             print(f"🔄 Auto-merge requested - attempting to merge PR...")
@@ -371,10 +380,33 @@ class IOLayer:
                         pr_url=pr.html_url
                     )
 
+    def find_prs_by_label(self, label: str) -> List[int]:
+        """Return open PR numbers carrying the given label (idempotency check)."""
+        numbers = []
+        for issue in self.github_repo.get_issues(state="open", labels=[label]):
+            if issue.pull_request is not None:
+                numbers.append(issue.number)
+        return numbers
+
+    def _ensure_labels_exist(self, names: List[str]) -> None:
+        """Create-if-missing each label (tolerate already-exists)."""
+        for name in names:
+            try:
+                self.github_repo.get_label(name)
+            except GithubException as e:
+                if e.status == 404:
+                    try:
+                        self.github_repo.create_label(name=name, color="ededed")
+                    except GithubException as ce:
+                        if ce.status != 422:  # 422 = already exists (race) → fine
+                            raise
+                else:
+                    raise
+
     # -----------------------------------------------------------------------------
     # High-Level Combined Operations
     # -----------------------------------------------------------------------------
-    
+
     def create_branch_commit_and_pr(
         self,
         branch_name: str,
@@ -383,7 +415,8 @@ class IOLayer:
         pr_title: str,
         pr_body: str,
         base_branch: str = "main",
-        auto_merge: bool = False
+        auto_merge: bool = False,
+        labels: Optional[List[str]] = None,
     ) -> Optional[str]:
         """Create a branch, commit files, and create a PR in one operation.
         
@@ -403,7 +436,8 @@ class IOLayer:
             pr_body: PR body/description
             base_branch: Base branch for the PR
             auto_merge: If True, attempt to auto-merge
-            
+            labels: Optional labels to provision (create-if-missing) and apply
+
         Returns:
             PR URL if created, None if dry run
         """
@@ -425,5 +459,6 @@ class IOLayer:
             body=pr_body,
             branch_name=branch_name,
             base_branch=base_branch,
-            auto_merge=auto_merge
+            auto_merge=auto_merge,
+            labels=labels,
         )

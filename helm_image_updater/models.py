@@ -14,6 +14,24 @@ class UpdateStrategy(Enum):
     INVALID = "invalid"
 
 
+class DeployStrategy(Enum):
+    """Deploy strategy (the DEPLOY_STRATEGY knob). Values double as the `deploy:*`
+    label value for promoter-managed (wave) strategies."""
+    STANDARD = "standard"
+    CLOUD_MULTI_STAGE = "cloud_multi_stage"
+    GRADUAL = "gradual"
+    CRITICAL = "critical"
+    CRITICAL_MANUAL_GATE = "critical-manual-gate"
+
+    @property
+    def is_wave(self) -> bool:
+        return self in (
+            DeployStrategy.GRADUAL,
+            DeployStrategy.CRITICAL,
+            DeployStrategy.CRITICAL_MANUAL_GATE,
+        )
+
+
 @dataclass
 class TagChange:
     """Represents a change to be made to a tag."""
@@ -42,6 +60,7 @@ class PRPlan:
     auto_merge: bool
     files_to_commit: List[str]  # List of file paths that will be committed
     commit_message: str
+    labels: List[str] = field(default_factory=list)
     
     
 @dataclass
