@@ -54,7 +54,8 @@ Optional:
 
 - `AUTOMERGE`: Whether to automatically merge PRs (default: "true", note: canary updates are always auto-merged). When set to `false`, PRs are auto-approved by the machine user instead, satisfying CODEOWNERS requirements so humans can merge without waiting for additional reviews.
 - `DRY_RUN`: Whether to perform a dry run (default: "false")
-- `MULTI_STAGE`: Enable multi-stage deployment (default: "false")
+- `MULTI_STAGE`: Enable multi-stage deployment (default: "false"). **Deprecated** — alias for `DEPLOY_STRATEGY=cloud_multi_stage`; prefer `DEPLOY_STRATEGY`.
+- `DEPLOY_STRATEGY`: Rollout strategy (default: "standard"): `standard`, `cloud_multi_stage`, `gradual`, `critical`, or `critical-manual-gate`. See [Deploy Strategies](#deploy-strategies).
 - `TARGET_PATH`: Path to the directory containing the stacks (default: ".")
 - `OVERRIDE_STACK`: Stack ID to explicitly target for the update, bypassing automatic stack selection (default: None)
 - `EXTRA_TAG1`, `EXTRA_TAG2`: Additional tags to update (format: "path:value")
@@ -89,6 +90,7 @@ Minimal usage example:
     automerge: "true"
     dry-run: "false"
     multi-stage: "false"
+    deploy-strategy: ""  # standard | cloud_multi_stage | gradual | critical | critical-manual-gate
     override-stack: "dev-keboola-gcp-us-central1"
     extra-tag1: "agent.image.tag:dev-2.0.0"
     extra-tag2: "messenger.image.tag:dev-2.0.0"
@@ -123,10 +125,15 @@ on:
         type: boolean
         default: false
       multi-stage:
-        description: "Enable multi-stage deployment (auto-merge dev, manual prod)"
+        description: "Enable multi-stage deployment (auto-merge dev, manual prod). Deprecated alias for deploy-strategy=cloud_multi_stage."
         required: false
         type: boolean
         default: false
+      deploy-strategy:
+        description: "Rollout strategy: standard | cloud_multi_stage | gradual | critical | critical-manual-gate"
+        required: false
+        type: string
+        default: ''
       override-stack:
         description: "Stack ID to explicitly target for the update, bypassing automatic stack selection."
         required: false
@@ -179,6 +186,7 @@ jobs:
           automerge: ${{ inputs.automerge }}
           dry-run: ${{ inputs.dry-run }}
           multi-stage: ${{ inputs.multi-stage }}
+          deploy-strategy: ${{ inputs.deploy-strategy }}
           override-stack: ${{ inputs.override-stack }}
           extra-tag1: ${{ inputs.extra-tag1 }}
           extra-tag2: ${{ inputs.extra-tag2 }}
@@ -257,12 +265,27 @@ If `argocdApplication` only contained `appManifestsRevision`, the entire block i
 # (empty file)
 ```
 
-## Multi-Stage Deployment
+## Deploy Strategies
 
-When `MULTI_STAGE=true`:
+`DEPLOY_STRATEGY` (action input `deploy-strategy`, default `standard`) selects how a production update is fanned out into PRs and who merges them. It supersedes the older boolean `MULTI_STAGE` flag.
 
-1. Creates and auto-merges PR for dev stacks (if automerge is also true, otherwise won't merge the dev PR)
-2. Creates a separate PR (without auto-merge) for production stacks
+| `DEPLOY_STRATEGY` | grouping | `AUTOMERGE=true` | `AUTOMERGE=false` |
+|---|---|---|---|
+| `standard` (default) | one PR (per-stack for a production tag) | merge the PR(s) | leave unmerged (per-stack) |
+| `cloud_multi_stage` | dev + prod PRs per cloud | merge dev, leave prod | leave all unmerged |
+| `gradual` · `critical` · `critical-manual-gate` | 4 unmerged **wave** PRs (waves 0–3) | *(ignored — release-promoter merges)* | *(release-promoter merges)* |
+
+### New vs. old parameters
+
+- **`DEPLOY_STRATEGY` is the single knob.** Unset (= `standard`) keeps today's behavior — existing deploys are unaffected.
+- **`MULTI_STAGE=true` is a deprecated alias for `DEPLOY_STRATEGY=cloud_multi_stage`** — identical behavior, kept for backward compatibility. If both are set, the explicit `DEPLOY_STRATEGY` wins.
+- **`AUTOMERGE`** still controls merging for `standard` and `cloud_multi_stage`. For the wave strategies (`gradual` / `critical` / `critical-manual-gate`) it is **ignored** — those PRs are always created unmerged and merged later by release-promoter.
+
+### Wave strategies (release-promoter)
+
+`gradual`, `critical`, and `critical-manual-gate` emit 4 unmerged PRs labeled `release:id:<id>`, `release:wave:<0-3>`, and `deploy:<strategy>`. [release-promoter](https://github.com/keboola/release-promoter) merges them wave-by-wave (0 → 3) as each wave syncs, passes UAT, and soaks; `critical-manual-gate` additionally waits for a human gate before the later waves. helm-image-updater itself never merges wave PRs (it still auto-approves them).
+
+> **Prerequisite (wave strategies):** the deploy token needs `Issues: write` (PR labels go through the Issues API), and release-promoter's merge identity needs `Contents: write` + `Pull requests: write` and must be a bypass actor on the target branch's ruleset.
 
 ## Development
 
