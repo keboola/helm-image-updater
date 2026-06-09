@@ -84,7 +84,8 @@ def test_executor_failure_on_unparseable_pr_url():
     result = execute_plan(plan, io)
     io.update_pull_request_body.assert_not_called()
     assert result.success is False
-    assert any("2" in e for e in result.errors)
+    assert any("for wave 2" in e for e in result.errors)
+    assert any("waves [2]" in e for e in result.errors)
 
 
 def test_executor_manifest_patch_failure_is_caught():

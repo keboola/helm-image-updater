@@ -241,7 +241,7 @@ def test_guard_passes_when_no_matching_open_release():
 # (4a) Direct tests for _build_manifest_context
 # ---------------------------------------------------------------------------
 from helm_image_updater.plan_builder import _build_manifest_context
-from helm_image_updater.manifest import compute_instance_id
+from helm_image_updater.manifest import compute_instance_id, extract_instance_id
 
 
 def test_build_manifest_context_with_real_sha():
@@ -293,9 +293,8 @@ def test_build_manifest_context_no_source():
 # ---------------------------------------------------------------------------
 # (4b) Composition test: _build_manifest_context instance_id matches
 #      compute_instance_id; and _guard_release_not_already_open matches on it.
+# (imports consolidated above: lines ~221 and ~243)
 # ---------------------------------------------------------------------------
-from helm_image_updater.plan_builder import _build_manifest_context
-from helm_image_updater.manifest import compute_instance_id, build_manifest, manifest_block, extract_instance_id
 
 
 def test_build_manifest_context_instance_id_matches_compute_instance_id():

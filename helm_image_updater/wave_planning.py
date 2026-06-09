@@ -7,7 +7,7 @@ were removed in the ST-4034 manifest-emission refactor. Release grouping/identit
 lives in a JSON manifest in the wave-0 anchor PR body (see manifest.py).
 """
 
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 
 from .models import DeployStrategy
 from .stack_classification import classify_stack
