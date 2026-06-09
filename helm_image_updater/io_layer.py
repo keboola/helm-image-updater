@@ -9,7 +9,7 @@ handles all side effects.
 import os
 import json
 from pathlib import Path
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional, Any, Tuple
 import yaml
 import dpath
 from git import Repo
@@ -387,6 +387,27 @@ class IOLayer:
             if issue.pull_request is not None:
                 numbers.append(issue.number)
         return numbers
+
+    def update_pull_request_body(self, pr_number: int, body: str) -> None:
+        """Patch a PR's body in place (used to inject the release manifest into the
+        wave-0 anchor once all wave PR numbers are known)."""
+        if self.dry_run:
+            print(f"[DRY RUN] Would update body of PR #{pr_number}")
+            return
+        pr = self.github_repo.get_pull(pr_number)
+        pr.edit(body=body)
+        print(f"📝 Updated PR #{pr_number} body (release manifest injected)")
+
+    def find_open_release_anchors(self) -> List[Tuple[int, str]]:
+        """Return (number, body) for every OPEN wave-0 anchor PR (label release:wave:0).
+        Used by the idempotency guard to detect an existing open release by instanceId."""
+        anchors: List[Tuple[int, str]] = []
+        for issue in self.github_repo.get_issues(state="open", labels=["release:wave:0"]):
+            if issue.pull_request is None:
+                continue
+            pr = self.github_repo.get_pull(issue.number)
+            anchors.append((issue.number, pr.body or ""))
+        return anchors
 
     def _ensure_labels_exist(self, names: List[str]) -> None:
         """Create-if-missing each label (tolerate already-exists)."""
