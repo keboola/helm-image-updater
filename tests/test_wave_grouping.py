@@ -48,29 +48,16 @@ def test_wave_grouping_one_pr_per_wave_with_labels():
     g1 = by_wave[1]
     assert g1["pr_type"] == "wave"
     assert g1["stacks"] == ["com-keboola-azure-north-europe"]
-    assert any(l.startswith("release:id:") for l in g1["labels"])
-    assert "release:wave:1" in g1["labels"]
-    assert "deploy:gradual" in g1["labels"]
+    assert g1["labels"] == ["release:wave:1", "deploy:gradual"]
 
-    # Strengthen: all 4 groups must have the correct label structure
-    release_id_labels = [
-        next(l for l in g["labels"] if l.startswith("release:id:"))
-        for g in groups
-    ]
-    # All groups share the same release:id label
-    assert len(set(release_id_labels)) == 1, (
-        f"All groups must share the same release:id:* label, got: {release_id_labels}"
-    )
-    # Each release:id label is ≤ 50 chars
-    for rid_label in release_id_labels:
-        assert len(rid_label) <= 50, f"release:id label too long: {rid_label!r}"
-
+    # Each wave group carries exactly its wave label + the deploy label (no release:id).
     for g in groups:
         wave = g["wave_number"]
-        expected_labels = [release_id_labels[0], f"release:wave:{wave}", "deploy:gradual"]
-        assert g["labels"] == expected_labels, (
-            f"Wave {wave} labels {g['labels']} != expected {expected_labels}"
+        assert g["labels"] == [f"release:wave:{wave}", "deploy:gradual"], (
+            f"Wave {wave} labels {g['labels']} != expected"
         )
+        assert not any(l.startswith("release:id:") for l in g["labels"])
+        assert "release_id" not in g
 
 
 def test_wave_grouping_requires_all_waves_0_to_3():
@@ -184,8 +171,7 @@ def test_create_pr_plan_wave_sets_labels_and_branch_title():
         'base_branch': 'main',
         'pr_type': 'wave',
         'wave_number': 2,
-        'release_id': 'dummy-service-deadbeef0123',
-        'labels': ["release:id:dummy-service-deadbeef0123", "release:wave:2", "deploy:gradual"],
+        'labels': ["release:wave:2", "deploy:gradual"],
     }
 
     pr_plan = _create_pr_plan(group, plan, config)
@@ -194,6 +180,7 @@ def test_create_pr_plan_wave_sets_labels_and_branch_title():
     assert pr_plan.auto_merge is False
     assert "wave2" in pr_plan.branch_name
     assert "wave 2" in pr_plan.pr_title
+    assert pr_plan.wave_number == 2
 
 
 def test_wave_never_auto_merges_even_for_canary_strategy():
@@ -207,9 +194,9 @@ from github.GithubException import GithubException
 
 def test_create_pull_request_provisions_and_applies_labels():
     repo = Mock()
-    # get_label raises 404 for the dynamic release:id label, succeeds otherwise
+    # get_label raises 404 for the dynamic release:wave: label, succeeds otherwise
     def _get_label(name):
-        if name.startswith("release:id:"):
+        if name.startswith("release:wave:"):
             raise GithubException(404, {"message": "Not Found"}, None)
         return Mock()
     repo.get_label.side_effect = _get_label
@@ -222,31 +209,31 @@ def test_create_pull_request_provisions_and_applies_labels():
     io.create_pull_request(
         title="t", body="b", branch_name="br", base_branch="main",
         auto_merge=False,
-        labels=["release:id:dummy-service-deadbeef0123", "release:wave:2", "deploy:gradual"],
+        labels=["release:wave:2", "deploy:gradual"],
     )
 
-    repo.create_label.assert_called()  # created the missing release:id label
-    pr.add_to_labels.assert_called_once_with(
-        "release:id:dummy-service-deadbeef0123", "release:wave:2", "deploy:gradual"
-    )
+    repo.create_label.assert_called()  # created the missing release:wave: label
+    pr.add_to_labels.assert_called_once_with("release:wave:2", "deploy:gradual")
 
 
 import pytest
 from helm_image_updater.plan_builder import _guard_release_not_already_open
+from helm_image_updater.manifest import manifest_block, build_manifest
 
 
-def test_guard_raises_when_release_id_already_has_open_prs():
+def test_guard_raises_when_instance_id_already_open():
     io = Mock()
-    io.find_prs_by_label.return_value = [101, 102]  # existing open PRs
-    with pytest.raises(RuntimeError, match="already"):
-        _guard_release_not_already_open("dummy-service-deadbeef0123", io)
+    body = manifest_block(build_manifest(app="connection", instance_id="connection-abc",
+                                         display_name="c", waves={0: 10, 1: 11, 2: 12, 3: 13}))
+    io.find_open_release_anchors.return_value = [(10, body)]
+    with pytest.raises(RuntimeError, match="already has an open anchor"):
+        _guard_release_not_already_open("connection-abc", io)
 
 
-def test_guard_passes_when_no_existing_prs():
+def test_guard_passes_when_no_matching_open_release():
     io = Mock()
-    io.find_prs_by_label.return_value = []
-    # Should not raise.
-    _guard_release_not_already_open("dummy-service-deadbeef0123", io)
+    io.find_open_release_anchors.return_value = []
+    _guard_release_not_already_open("connection-abc", io)  # no raise
 
 
 def test_wave_grouping_excludes_e2e_stacks():
