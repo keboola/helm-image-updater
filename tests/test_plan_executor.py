@@ -68,3 +68,37 @@ def test_executor_withholds_manifest_on_partial_creation():
     result = execute_plan(plan, io)
     io.update_pull_request_body.assert_not_called()
     assert result.success is False
+
+
+def test_executor_failure_on_unparseable_pr_url():
+    """Wave 2 returns an URL without a PR number → no manifest patch, result.success False,
+    and an error message that mentions wave 2."""
+    plan = _wave_plan()
+    io = MagicMock()
+    io.create_branch_commit_and_pr.side_effect = [
+        "https://github.com/o/r/pull/10",   # wave 0
+        "https://github.com/o/r/pull/11",   # wave 1
+        "https://github.com/o/r/no-number",  # wave 2 — unparseable
+        "https://github.com/o/r/pull/13",   # wave 3
+    ]
+    result = execute_plan(plan, io)
+    io.update_pull_request_body.assert_not_called()
+    assert result.success is False
+    assert any("2" in e for e in result.errors)
+
+
+def test_executor_manifest_patch_failure_is_caught():
+    """update_pull_request_body throws → result.success False, error contains
+    'Manifest patch FAILED' and the wave PR numbers; no exception escapes execute_plan."""
+    plan = _wave_plan()
+    io = MagicMock()
+    io.create_branch_commit_and_pr.side_effect = [
+        f"https://github.com/o/r/pull/{10 + w}" for w in range(4)
+    ]
+    io.update_pull_request_body.side_effect = Exception("boom")
+    result = execute_plan(plan, io)
+    assert result.success is False
+    assert any("Manifest patch FAILED" in e for e in result.errors)
+    # All four wave PR numbers must appear in the error
+    for w in range(4):
+        assert any(str(10 + w) in e for e in result.errors)

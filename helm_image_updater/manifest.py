@@ -42,8 +42,10 @@ def compute_instance_id(app: str, source_sha: Optional[str], image_tag: str) -> 
     available; otherwise '<app>-<sha256(app\\0image_tag)[:12]>' — NOT a random UUID — so a
     re-run of the same (app, image_tag) yields the SAME id and HIU's idempotency guard still
     detects a duplicate fan-out when pipeline metadata is absent (the test harness passes no
-    METADATA, F6). Unique per fan-out: a different tag → a different id; the promoter's
-    duplicate-instanceId guard is the backstop for a genuine same-tag collision."""
+    METADATA, F6). With a real SHA the id identifies the source commit (two fan-outs of
+    different image tags built from the same commit share one instanceId — intended). On the
+    hash-fallback path: a different tag → a different id; the promoter's duplicate-instanceId
+    guard is the backstop for a genuine same-tag collision."""
     safe = _machine_safe(app)
     sha = (source_sha or "").strip()
     if sha and sha.lower() != "unknown":

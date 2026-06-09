@@ -154,6 +154,16 @@ def _patch_anchor_manifest(plan: UpdatePlan, io_layer: IOLayer, wave_pr_numbers:
         waves=wave_pr_numbers, source_sha=ctx.get("source_sha"), source_pr=ctx.get("source_pr"),
     )
     new_body = f"{wave0_body}\n\n{manifest_block(manifest)}"
-    io_layer.update_pull_request_body(anchor, new_body)
+    try:
+        io_layer.update_pull_request_body(anchor, new_body)
+    except Exception as exc:
+        result.success = False
+        result.errors.append(
+            f"Manifest patch FAILED on wave-0 anchor PR #{anchor}: {exc}. "
+            f"The release is manifest-less; close wave PRs "
+            f"{sorted(wave_pr_numbers.values())} before re-running, or patch the anchor "
+            f"body manually."
+        )
+        return
     print(f"Release manifest written to wave-0 anchor PR #{anchor} "
           f"(instanceId={ctx['instance_id']}, waves={manifest['waves']})")

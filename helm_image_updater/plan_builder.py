@@ -12,7 +12,7 @@ _ryaml.preserve_quotes = True
 
 from .models import UpdatePlan, FileChange, PRPlan, UpdateStrategy, TagChange, DeployStrategy
 from .wave_planning import wave_label, deploy_label, resolve_wave
-from .manifest import compute_instance_id
+from .manifest import compute_instance_id, extract_instance_id
 from .environment import EnvironmentConfig
 from .io_layer import IOLayer
 from .tag_classification import detect_tag_type, TagType
@@ -560,7 +560,6 @@ def _guard_release_not_already_open(instance_id: str, io_layer: IOLayer) -> None
     duplicate by parsing the instanceId out of each OPEN release:wave:0 anchor PR body.
     A second fan-out for the same instanceId would give the promoter a duplicate release.
     """
-    from .manifest import extract_instance_id
     for number, body in io_layer.find_open_release_anchors():
         if extract_instance_id(body) == instance_id:
             raise RuntimeError(

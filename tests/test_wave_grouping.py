@@ -236,6 +236,104 @@ def test_guard_passes_when_no_matching_open_release():
     _guard_release_not_already_open("connection-abc", io)  # no raise
 
 
+
+# ---------------------------------------------------------------------------
+# (4a) Direct tests for _build_manifest_context
+# ---------------------------------------------------------------------------
+from helm_image_updater.plan_builder import _build_manifest_context
+from helm_image_updater.manifest import compute_instance_id
+
+
+def test_build_manifest_context_with_real_sha():
+    plan = Mock()
+    plan.helm_chart = "connection"
+    plan.image_tag = "production-abc"
+    plan.metadata = {"source": {"sha": "deadbeef0123FULL", "pr_url": "https://x/pull/1"}}
+
+    ctx = _build_manifest_context(plan)
+
+    assert ctx["app"] == "connection"
+    assert ctx["instance_id"] == "connection-deadbeef0123"
+    assert ctx["display_name"] == "connection@production-abc"
+    assert ctx["source_sha"] == "deadbeef0123FULL"
+    assert ctx["source_pr"] == "https://x/pull/1"
+
+
+def test_build_manifest_context_with_unknown_sha():
+    plan = Mock()
+    plan.helm_chart = "connection"
+    plan.image_tag = "production-abc"
+    plan.metadata = {"source": {"sha": "Unknown"}}
+
+    ctx = _build_manifest_context(plan)
+
+    assert ctx["source_sha"] is None
+    assert ctx["source_pr"] is None
+    # instance_id falls back to hash; must start with "connection-" and be deterministic
+    assert ctx["instance_id"].startswith("connection-")
+    ctx2 = _build_manifest_context(plan)
+    assert ctx["instance_id"] == ctx2["instance_id"]
+
+
+def test_build_manifest_context_no_source():
+    plan = Mock()
+    plan.helm_chart = "connection"
+    plan.image_tag = "production-abc"
+    plan.metadata = {}
+
+    ctx = _build_manifest_context(plan)
+
+    assert ctx["source_sha"] is None
+    assert ctx["source_pr"] is None
+    assert ctx["instance_id"].startswith("connection-")
+    ctx2 = _build_manifest_context(plan)
+    assert ctx["instance_id"] == ctx2["instance_id"]
+
+
+# ---------------------------------------------------------------------------
+# (4b) Composition test: _build_manifest_context instance_id matches
+#      compute_instance_id; and _guard_release_not_already_open matches on it.
+# ---------------------------------------------------------------------------
+from helm_image_updater.plan_builder import _build_manifest_context
+from helm_image_updater.manifest import compute_instance_id, build_manifest, manifest_block, extract_instance_id
+
+
+def test_build_manifest_context_instance_id_matches_compute_instance_id():
+    sha = "deadbeef0123FULL"
+    plan = Mock()
+    plan.helm_chart = "connection"
+    plan.image_tag = "production-abc"
+    plan.metadata = {"source": {"sha": sha}}
+
+    ctx = _build_manifest_context(plan)
+    expected = compute_instance_id("connection", sha, "production-abc")
+    assert ctx["instance_id"] == expected
+
+
+def test_guard_matches_anchor_containing_that_instance_id():
+    sha = "deadbeef0123FULL"
+    plan = Mock()
+    plan.helm_chart = "connection"
+    plan.image_tag = "production-abc"
+    plan.metadata = {"source": {"sha": sha}}
+
+    ctx = _build_manifest_context(plan)
+    iid = ctx["instance_id"]
+
+    # Build a body that embeds that instanceId
+    body = manifest_block(build_manifest(
+        app="connection", instance_id=iid, display_name="connection@production-abc",
+        waves={0: 5, 1: 6, 2: 7, 3: 8},
+    ))
+    assert extract_instance_id(body) == iid
+
+    # Guard must raise because an open anchor carries that instanceId
+    io = Mock()
+    io.find_open_release_anchors.return_value = [(5, body)]
+    with pytest.raises(RuntimeError, match="already has an open anchor"):
+        _guard_release_not_already_open(iid, io)
+
+
 def test_wave_grouping_excludes_e2e_stacks():
     waves = {
         "dev-keboola-gcp-us-central1": 0,
