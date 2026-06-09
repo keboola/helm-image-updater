@@ -1,5 +1,7 @@
 # PR-A: DEPLOY_STRATEGY & wave PRs (helm-image-updater) Implementation Plan
 
+> **⚠️ Partially superseded (2026-06-09):** the `release:id:<id>` label contract described below was retired before release. Release grouping/identity now lives in a JSON manifest in the wave-0 anchor PR body, and the idempotency guard matches `instanceId` in open `release:wave:0` anchors — see `docs/plans/2026-06-09-release-manifest-emission.md`. Wave labels (`release:wave:N`), `deploy:<strategy>`, `rollout_wave` resolution, and no-auto-merge semantics still apply.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Teach helm-image-updater to emit promoter-consumable **wave PRs** (created up front, unmerged, labeled `release:id` / `release:wave:N` / `deploy:<strategy>`) behind a new `DEPLOY_STRATEGY` knob, without breaking existing deploys.

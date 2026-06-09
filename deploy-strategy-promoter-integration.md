@@ -2,6 +2,14 @@
 
 **Status:** design (spec) · **Issue:** [ST-4034](https://linear.app/keboola/issue/ST-4034) · **Date:** 2026-06-05
 
+> **⚠️ Partially superseded (2026-06-09):** the `release:id:<releaseId>` label contract described
+> below was retired before release. Release grouping/identity now lives in a JSON **release
+> manifest** that HIU writes into the wave-0 anchor PR body (create-then-patch), and the
+> idempotency guard matches `instanceId` in open `release:wave:0` anchors — see
+> `docs/plans/2026-06-09-release-manifest-emission.md`. The promoter also anchors discovery on
+> **wave 0** (not wave 3). Wave labels (`release:wave:N`), `deploy:<strategy>`, `rollout_wave`
+> resolution, and no-auto-merge semantics still apply.
+
 ## 1. Goal
 
 Teach `helm-image-updater` (HIU) to emit the PRs that `release-promoter` consumes, so promoter
