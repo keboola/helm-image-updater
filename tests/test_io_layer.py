@@ -188,8 +188,10 @@ class TestAutoMerge:
         mock_pr.update = Mock()
         mock_github_repo.create_pull = Mock(return_value=mock_pr)
 
-        # Mock push to not actually do anything
-        with patch.object(io_layer, 'push_branch', return_value=True):
+        # Mock push to not actually do anything; patch sleep so the 10-attempt
+        # retry loop (default retry_delay=5) doesn't really wait 45s.
+        with patch.object(io_layer, 'push_branch', return_value=True), \
+             patch('helm_image_updater.io_layer.sleep'):
             # Should raise AutoMergeError when auto_merge=True
             with pytest.raises(AutoMergeError) as exc_info:
                 io_layer.create_pull_request(
