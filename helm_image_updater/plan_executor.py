@@ -1,8 +1,17 @@
 """Plan executor - executes a prepared plan."""
 
-from typing import Dict, List
+import re
+from typing import Dict, List, Optional
 from .models import UpdatePlan, ExecutionResult
 from .io_layer import IOLayer
+from .manifest import build_manifest, manifest_block
+
+_PR_NUM_RE = re.compile(r"/pull/(\d+)")
+
+
+def _pr_number_from_url(url: str) -> Optional[int]:
+    m = _PR_NUM_RE.search(url or "")
+    return int(m.group(1)) if m else None
 
 
 def execute_plan(plan: UpdatePlan, io_layer: IOLayer) -> ExecutionResult:
@@ -67,7 +76,10 @@ def _group_files_by_pr(plan: UpdatePlan) -> Dict[str, Dict[str, any]]:
 
 
 def _execute_pr_plans(plan: UpdatePlan, io_layer: IOLayer, result: ExecutionResult):
-    """Create all pull requests."""
+    """Create all pull requests; then (wave mode) patch the wave-0 anchor manifest."""
+    wave_pr_numbers: Dict[int, int] = {}   # wave -> PR number
+    wave0_body: Optional[str] = None       # the wave-0 PR's created body
+
     for pr_plan in plan.pr_plans:
         if plan.dry_run:
             print(f"[DRY RUN] Would create PR: {pr_plan.pr_title}")
@@ -77,27 +89,71 @@ def _execute_pr_plans(plan: UpdatePlan, io_layer: IOLayer, result: ExecutionResu
             print(f"  Files: {', '.join(pr_plan.files_to_commit)}")
             if pr_plan.labels:
                 print(f"  Labels: {', '.join(pr_plan.labels)}")
-        else:
-            # Step 1: Write files to disk first
-            relevant_file_changes = [fc for fc in plan.file_changes 
-                                   if fc.file_path in pr_plan.files_to_commit]
-            io_layer.write_file_changes(relevant_file_changes)
-            
-            # Step 2: Create branch, commit, and PR (files already exist on disk)
-            pr_url = io_layer.create_branch_commit_and_pr(
-                branch_name=pr_plan.branch_name,
-                files_to_commit=pr_plan.files_to_commit,  # List[str] - just paths
-                commit_message=pr_plan.commit_message,
-                pr_title=pr_plan.pr_title,
-                pr_body=pr_plan.pr_body,
-                base_branch=pr_plan.base_branch,
-                auto_merge=pr_plan.auto_merge,
-                labels=pr_plan.labels,
-            )
+            continue
 
-            if pr_url:
-                result.pr_urls.append(pr_url)
-                # Note: Auto-merge status is already printed in io_layer
-                print(f"Created PR: {pr_plan.pr_title}")
-            else:
-                result.errors.append(f"Failed to create PR: {pr_plan.pr_title}")
+        relevant_file_changes = [fc for fc in plan.file_changes
+                                 if fc.file_path in pr_plan.files_to_commit]
+        io_layer.write_file_changes(relevant_file_changes)
+
+        pr_url = io_layer.create_branch_commit_and_pr(
+            branch_name=pr_plan.branch_name,
+            files_to_commit=pr_plan.files_to_commit,
+            commit_message=pr_plan.commit_message,
+            pr_title=pr_plan.pr_title,
+            pr_body=pr_plan.pr_body,
+            base_branch=pr_plan.base_branch,
+            auto_merge=pr_plan.auto_merge,
+            labels=pr_plan.labels,
+        )
+
+        if pr_url:
+            result.pr_urls.append(pr_url)
+            print(f"Created PR: {pr_plan.pr_title}")
+            if pr_plan.wave_number is not None:
+                num = _pr_number_from_url(pr_url)
+                if num is not None:
+                    wave_pr_numbers[pr_plan.wave_number] = num
+                    if pr_plan.wave_number == 0:
+                        wave0_body = pr_plan.pr_body
+                else:
+                    result.success = False
+                    result.errors.append(
+                        f"Could not parse PR number from URL '{pr_url}' for wave "
+                        f"{pr_plan.wave_number}; manifest will be withheld (F3).")
+        else:
+            result.errors.append(f"Failed to create PR: {pr_plan.pr_title}")
+            if pr_plan.wave_number is not None:
+                result.success = False  # a missing wave PR → withhold the manifest (F3)
+
+    if not plan.dry_run and plan.manifest_context and wave_pr_numbers:
+        _patch_anchor_manifest(plan, io_layer, wave_pr_numbers, wave0_body, result)
+
+
+def _patch_anchor_manifest(plan: UpdatePlan, io_layer: IOLayer, wave_pr_numbers: Dict[int, int],
+                            wave0_body: Optional[str], result: ExecutionResult) -> None:
+    """Build the v1 manifest from the collected {wave -> PR#} and patch the wave-0 body.
+
+    F3: refuse to emit a PARTIAL manifest. Every declared wave PR must have a parsed PR
+    number, or we withhold the manifest entirely (a manifest with a subset of waves is
+    structurally valid to the promoter — it would treat it as a shorter release and orphan
+    the un-listed wave PRs)."""
+    ctx = plan.manifest_context
+    expected = {p.wave_number for p in plan.pr_plans if p.wave_number is not None}
+    if set(wave_pr_numbers) != expected or wave0_body is None:
+        missing = sorted(expected - set(wave_pr_numbers))
+        result.success = False
+        result.errors.append(
+            f"Manifest NOT written: missing PR numbers for waves {missing} "
+            f"(collected {sorted(wave_pr_numbers)}) or wave-0 body unavailable; refusing to "
+            f"emit a partial manifest that would orphan wave PRs (F3)."
+        )
+        return
+    anchor = wave_pr_numbers[0]
+    manifest = build_manifest(
+        app=ctx["app"], instance_id=ctx["instance_id"], display_name=ctx["display_name"],
+        waves=wave_pr_numbers, source_sha=ctx.get("source_sha"), source_pr=ctx.get("source_pr"),
+    )
+    new_body = f"{wave0_body}\n\n{manifest_block(manifest)}"
+    io_layer.update_pull_request_body(anchor, new_body)
+    print(f"Release manifest written to wave-0 anchor PR #{anchor} "
+          f"(instanceId={ctx['instance_id']}, waves={manifest['waves']})")
