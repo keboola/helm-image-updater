@@ -103,3 +103,42 @@ def test_executor_manifest_patch_failure_is_caught():
     # All four wave PR numbers must appear in the error
     for w in range(4):
         assert any(str(10 + w) in e for e in result.errors)
+
+
+def test_executor_wave_creation_exception_caught_breaks_and_reports():
+    """A raising wave-PR creation (the realistic live failure: git push / GitHub 5xx) must
+    NOT bubble to execute_plan's generic catch-all: the executor records an actionable
+    per-wave error, stops fanning out (no further creates -> no extra orphans), withholds
+    the manifest (F3), and fails the run."""
+    plan = _wave_plan()
+    io = MagicMock()
+    io.create_branch_commit_and_pr.side_effect = [
+        "https://github.com/keboola/kbc-stacks/pull/10",
+        "https://github.com/keboola/kbc-stacks/pull/11",
+        Exception("boom-502"),  # wave 2 creation raises
+        "https://github.com/keboola/kbc-stacks/pull/13",  # must never be attempted
+    ]
+    result = execute_plan(plan, io)
+
+    assert io.create_branch_commit_and_pr.call_count == 3  # broke after the failure
+    io.update_pull_request_body.assert_not_called()        # manifest withheld (F3)
+    assert result.success is False
+    assert any("wave 2" in e and "boom-502" in e for e in result.errors)
+    # The F3 reporter still emits the collected-vs-missing picture.
+    assert any("waves [2, 3]" in e and "[0, 1]" in e for e in result.errors)
+
+
+def test_executor_non_wave_creation_exception_still_propagates_to_catch_all():
+    """Non-wave plans keep the historical behavior: a raising creation aborts the run via
+    execute_plan's catch-all (no per-PR continue/break semantics change)."""
+    plan = UpdatePlan(strategy=UpdateStrategy.PRODUCTION, helm_chart="connection", image_tag="t")
+    fc = FileChange(file_path="s/connection/tag.yaml", old_content="a", new_content="b",
+                    change_description="d")
+    plan.file_changes.append(fc)
+    plan.pr_plans.append(PRPlan(branch_name="b", pr_title="t", pr_body="x", base_branch="main",
+                                auto_merge=False, files_to_commit=[fc.file_path], commit_message="c"))
+    io = MagicMock()
+    io.create_branch_commit_and_pr.side_effect = Exception("boom")
+    result = execute_plan(plan, io)
+    assert result.success is False
+    assert any("Execution failed" in e and "boom" in e for e in result.errors)

@@ -95,16 +95,29 @@ def _execute_pr_plans(plan: UpdatePlan, io_layer: IOLayer, result: ExecutionResu
                                  if fc.file_path in pr_plan.files_to_commit]
         io_layer.write_file_changes(relevant_file_changes)
 
-        pr_url = io_layer.create_branch_commit_and_pr(
-            branch_name=pr_plan.branch_name,
-            files_to_commit=pr_plan.files_to_commit,
-            commit_message=pr_plan.commit_message,
-            pr_title=pr_plan.pr_title,
-            pr_body=pr_plan.pr_body,
-            base_branch=pr_plan.base_branch,
-            auto_merge=pr_plan.auto_merge,
-            labels=pr_plan.labels,
-        )
+        try:
+            pr_url = io_layer.create_branch_commit_and_pr(
+                branch_name=pr_plan.branch_name,
+                files_to_commit=pr_plan.files_to_commit,
+                commit_message=pr_plan.commit_message,
+                pr_title=pr_plan.pr_title,
+                pr_body=pr_plan.pr_body,
+                base_branch=pr_plan.base_branch,
+                auto_merge=pr_plan.auto_merge,
+                labels=pr_plan.labels,
+            )
+        except Exception as exc:
+            if pr_plan.wave_number is None:
+                raise  # non-wave plans keep the historical abort-via-catch-all behavior
+            # A failed wave PR already makes the release unusable (F3 withholds the
+            # manifest), so creating further wave PRs would only add orphans to clean
+            # up. Record an actionable error and stop fanning out; the fall-through to
+            # _patch_anchor_manifest reports the collected-vs-missing wave picture.
+            result.success = False
+            result.errors.append(
+                f"Failed to create wave {pr_plan.wave_number} PR "
+                f"('{pr_plan.pr_title}'): {exc}")
+            break
 
         if pr_url:
             result.pr_urls.append(pr_url)
