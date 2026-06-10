@@ -188,8 +188,10 @@ class TestAutoMerge:
         mock_pr.update = Mock()
         mock_github_repo.create_pull = Mock(return_value=mock_pr)
 
-        # Mock push to not actually do anything
-        with patch.object(io_layer, 'push_branch', return_value=True):
+        # Mock push to not actually do anything; patch sleep so the 10-attempt
+        # retry loop (default retry_delay=5) doesn't really wait 45s.
+        with patch.object(io_layer, 'push_branch', return_value=True), \
+             patch('helm_image_updater.io_layer.sleep'):
             # Should raise AutoMergeError when auto_merge=True
             with pytest.raises(AutoMergeError) as exc_info:
                 io_layer.create_pull_request(
@@ -384,3 +386,35 @@ class TestAutoApprove:
         # Dry run returns None, no GitHub calls made
         assert result is None
         mock_approve_github_repo.get_pull.assert_not_called()
+
+
+def _io(github_repo, dry_run=False):
+    return IOLayer(repo=MagicMock(), github_repo=github_repo, dry_run=dry_run,
+                   approve_github_repo=MagicMock())
+
+
+def test_update_pull_request_body_edits_pr():
+    gh = MagicMock()
+    pr = MagicMock()
+    gh.get_pull.return_value = pr
+    _io(gh).update_pull_request_body(42, "new body")
+    gh.get_pull.assert_called_once_with(42)
+    pr.edit.assert_called_once_with(body="new body")
+
+
+def test_update_pull_request_body_noop_in_dry_run():
+    gh = MagicMock()
+    _io(gh, dry_run=True).update_pull_request_body(42, "x")
+    gh.get_pull.assert_not_called()
+
+
+def test_find_open_release_anchors_returns_number_and_body():
+    gh = MagicMock()
+    issue = MagicMock(); issue.number = 7; issue.pull_request = object()
+    non_pr = MagicMock(); non_pr.pull_request = None
+    gh.get_issues.return_value = [issue, non_pr]
+    pr = MagicMock(); pr.body = "BODY"
+    gh.get_pull.return_value = pr
+    anchors = _io(gh).find_open_release_anchors()
+    gh.get_issues.assert_called_once_with(state="open", labels=["release:wave:0"])
+    assert anchors == [(7, "BODY")]

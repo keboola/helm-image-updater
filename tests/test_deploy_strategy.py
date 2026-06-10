@@ -111,30 +111,6 @@ def test_wave_strategy_requires_image_tag_not_just_extra_tag():
     assert any("IMAGE_TAG" in e for e in errors)
 
 
-# Task 4: compute_release_id + label builders
-from helm_image_updater.wave_planning import compute_release_id, release_id_label
-
-GH_LABEL_MAX = 50
-
-
-def test_release_id_label_fits_github_limit_even_for_long_inputs():
-    rid = compute_release_id("infrastructure-plugin-update-components",
-                             "production-633743c4fc2431d3a9727987a3152a8ea5ec38c2")
-    assert len(release_id_label(rid)) <= GH_LABEL_MAX
-
-
-def test_release_id_is_deterministic():
-    a = compute_release_id("connection", "production-abc123")
-    b = compute_release_id("connection", "production-abc123")
-    assert a == b
-
-
-def test_release_id_distinct_for_distinct_tags():
-    a = compute_release_id("connection", "production-aaaa")
-    b = compute_release_id("connection", "production-bbbb")
-    assert a != b
-
-
 # Task 5: resolve_wave
 from helm_image_updater.wave_planning import resolve_wave
 

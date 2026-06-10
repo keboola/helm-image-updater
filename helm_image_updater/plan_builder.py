@@ -11,7 +11,8 @@ _ryaml = YAML()
 _ryaml.preserve_quotes = True
 
 from .models import UpdatePlan, FileChange, PRPlan, UpdateStrategy, TagChange, DeployStrategy
-from .wave_planning import compute_release_id, release_id_label, wave_label, deploy_label, resolve_wave
+from .wave_planning import wave_label, deploy_label, resolve_wave
+from .manifest import compute_instance_id, extract_instance_id
 from .environment import EnvironmentConfig
 from .io_layer import IOLayer
 from .tag_classification import detect_tag_type, TagType
@@ -88,9 +89,11 @@ def prepare_plan(config: EnvironmentConfig, io_layer: IOLayer) -> UpdatePlan:
     # Group changes into PRs
     pr_groups = _group_changes_for_prs(stack_changes, plan, config, io_layer)
 
-    # Idempotency: in wave mode, never fan out a duplicate release.
-    if config.deploy_strategy.is_wave and not config.dry_run and pr_groups:
-        _guard_release_not_already_open(pr_groups[0]['release_id'], io_layer)
+    # Wave mode: derive the manifest identity, then guard against a duplicate fan-out.
+    if config.deploy_strategy.is_wave and pr_groups:
+        plan.manifest_context = _build_manifest_context(plan)
+        if not config.dry_run:
+            _guard_release_not_already_open(plan.manifest_context["instance_id"], io_layer)
 
     # Create PR plans
     for pr_group in pr_groups:
@@ -499,9 +502,22 @@ def _group_changes_for_prs(
         ]
 
 
+def _build_manifest_context(plan: UpdatePlan) -> Dict[str, Any]:
+    """Compute the wave-0 manifest's identity fields from the plan + pipeline metadata."""
+    source = (plan.metadata or {}).get("source", {})
+    source_sha = source.get("sha")
+    source_pr = source.get("pr_url")
+    return {
+        "app": plan.helm_chart,
+        "instance_id": compute_instance_id(plan.helm_chart, source_sha, plan.image_tag),
+        "display_name": f"{plan.helm_chart}@{plan.image_tag}",
+        "source_sha": source_sha if (source_sha and str(source_sha).lower() != "unknown") else None,
+        "source_pr": source_pr or None,
+    }
+
+
 def _group_changes_by_wave(stack_changes, plan, config, io_layer):
     """Group changes into one PR per rollout wave (0..3) for promoter consumption."""
-    release_id = compute_release_id(plan.helm_chart, plan.image_tag)
     deploy_lbl = deploy_label(config.deploy_strategy)
 
     # Never roll an e2e stack into a production wave (defensive — known e2e are also in EXCLUDED_STACKS).
@@ -532,25 +548,24 @@ def _group_changes_by_wave(stack_changes, plan, config, io_layer):
             'base_branch': 'main',
             'pr_type': 'wave',
             'wave_number': wave,
-            'release_id': release_id,
-            'labels': [release_id_label(release_id), wave_label(wave), deploy_lbl],
+            'labels': [wave_label(wave), deploy_lbl],
         })
     return groups
 
 
-def _guard_release_not_already_open(release_id: str, io_layer: IOLayer) -> None:
-    """Fail loudly if a release with this id already has open PRs (re-run safety).
+def _guard_release_not_already_open(instance_id: str, io_layer: IOLayer) -> None:
+    """Fail loudly if an open release with this instanceId already exists (re-run safety).
 
-    Creating a second set of wave PRs with the same release:id would give promoter
-    duplicate release:wave:N labels -> ¬wellFormed -> Conflicted.
+    Grouping moved from the release:id label to the wave-0 body manifest, so we detect a
+    duplicate by parsing the instanceId out of each OPEN release:wave:0 anchor PR body.
+    A second fan-out for the same instanceId would give the promoter a duplicate release.
     """
-    existing = io_layer.find_prs_by_label(release_id_label(release_id))
-    if existing:
-        raise RuntimeError(
-            f"Release '{release_id}' already has open PRs {existing}. "
-            f"Refusing to create duplicate wave PRs (would make the release Conflicted). "
-            f"Close/finish the existing release first."
-        )
+    for number, body in io_layer.find_open_release_anchors():
+        if extract_instance_id(body) == instance_id:
+            raise RuntimeError(
+                f"Release '{instance_id}' already has an open anchor PR #{number}. "
+                f"Refusing to create duplicate wave PRs. Close/finish the existing release first."
+            )
 
 
 def _create_pr_plan(pr_group: Dict[str, Any], plan: UpdatePlan, config: EnvironmentConfig) -> PRPlan:
@@ -655,6 +670,7 @@ def _create_pr_plan(pr_group: Dict[str, Any], plan: UpdatePlan, config: Environm
         files_to_commit=files_to_commit,
         commit_message=commit_message,
         labels=pr_group.get('labels', []),
+        wave_number=pr_group.get('wave_number'),
     )
 
 

@@ -283,7 +283,7 @@ If `argocdApplication` only contained `appManifestsRevision`, the entire block i
 
 ### Wave strategies (release-promoter)
 
-`gradual`, `critical`, and `critical-manual-gate` emit 4 unmerged PRs labeled `release:id:<id>`, `release:wave:<0-3>`, and `deploy:<strategy>`. [release-promoter](https://github.com/keboola/release-promoter) merges them wave-by-wave (0 → 3) as each wave syncs, passes UAT, and soaks; `critical-manual-gate` additionally waits for a human gate before the later waves. helm-image-updater itself never merges wave PRs (it still auto-approves them).
+`gradual`, `critical`, and `critical-manual-gate` emit 4 unmerged PRs labeled `release:wave:<0-3>` and `deploy:<strategy>`. Release grouping/identity is carried by a JSON **release manifest** that helm-image-updater writes into the wave-0 anchor PR body (machine-read by release-promoter); the legacy `release:id` label is retired. [release-promoter](https://github.com/keboola/release-promoter) merges them wave-by-wave (0 → 3) as each wave syncs, passes UAT, and soaks; `critical-manual-gate` additionally waits for a human gate before the later waves. helm-image-updater itself never merges wave PRs (it still auto-approves them).
 
 > **Prerequisite (wave strategies):** the deploy token needs `Issues: write` (PR labels go through the Issues API), and release-promoter's merge identity needs `Contents: write` + `Pull requests: write` and must be a bypass actor on the target branch's ruleset.
 

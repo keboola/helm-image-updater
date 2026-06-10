@@ -61,8 +61,9 @@ class PRPlan:
     files_to_commit: List[str]  # List of file paths that will be committed
     commit_message: str
     labels: List[str] = field(default_factory=list)
-    
-    
+    wave_number: Optional[int] = None  # set only for pr_type == 'wave'
+
+
 @dataclass
 class UpdatePlan:
     """Complete plan for the update operation."""
@@ -85,7 +86,8 @@ class UpdatePlan:
     multi_stage: bool = False
     override_stack: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
-    
+    manifest_context: Optional[Dict[str, Any]] = None  # {app, instance_id, display_name, source_sha, source_pr}; wave mode only
+
     def has_changes(self) -> bool:
         """Check if there are any changes to make."""
         return bool(self.file_changes)
