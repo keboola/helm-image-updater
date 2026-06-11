@@ -18,6 +18,7 @@ from .io_layer import IOLayer
 from .tag_classification import detect_tag_type, TagType
 from .stack_classification import classify_stack, get_dev_stacks
 from .message_generation import (
+    build_tag_string,
     generate_commit_message,
     generate_pr_title,
     generate_pr_title_prefix,
@@ -610,9 +611,11 @@ def _create_pr_plan(pr_group: Dict[str, Any], plan: UpdatePlan, config: Environm
     # Generate PR title
     if pr_type == 'wave':
         wave = pr_group['wave_number']
+        # The suffix is the same chart+tags string (incl. extra tags) the release
+        # search link quotes — they must match or the search finds nothing (ST-4035).
         pr_title = (
             f"[{plan.helm_chart} {config.deploy_strategy.value} wave {wave}] "
-            f"{plan.helm_chart}@{plan.image_tag}"
+            f"{build_tag_string(plan.helm_chart, plan.image_tag, plan.extra_tags)}"
         )
     else:
         pr_title_prefix = generate_pr_title_prefix(

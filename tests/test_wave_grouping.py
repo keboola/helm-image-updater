@@ -183,6 +183,39 @@ def test_create_pr_plan_wave_sets_labels_and_branch_title():
     assert pr_plan.wave_number == 2
 
 
+def test_create_pr_plan_wave_title_includes_extra_tags():
+    """Wave titles must carry the SAME chart+tags string the release search link quotes —
+    with extra tags, otherwise the quoted-phrase search matches nothing (ST-4035)."""
+    config = Mock(); config.automerge = False
+    config.deploy_strategy = DeployStrategy.GRADUAL
+    plan = Mock()
+    plan.strategy = UpdateStrategy.PRODUCTION
+    plan.multi_stage = False
+    plan.helm_chart = "dummy-service"
+    plan.image_tag = "production-abc123"
+    plan.extra_tags = [{"path": "agent.tag", "value": "production-agent-xyz"}]
+    plan.metadata = {}
+
+    fc = Mock(); fc.file_path = "kbc-us-east-1/dummy-service/tag.yaml"
+    group = {
+        'stacks': ["kbc-us-east-1"],
+        'changes': [{"stack": "kbc-us-east-1", "file_change": fc, "changes": []}],
+        'base_branch': 'main',
+        'pr_type': 'wave',
+        'wave_number': 2,
+        'labels': ["release:wave:2", "deploy:gradual"],
+    }
+
+    pr_plan = _create_pr_plan(group, plan, config)
+
+    from helm_image_updater.message_generation import build_tag_string
+    tag_string = build_tag_string(plan.helm_chart, plan.image_tag, plan.extra_tags)
+    assert tag_string == "dummy-service@production-abc123 agent.tag@production-agent-xyz"
+    # The searchable phrase must appear verbatim in the title.
+    assert tag_string in pr_plan.pr_title
+    assert pr_plan.pr_title.startswith("[dummy-service gradual wave 2] ")
+
+
 def test_wave_never_auto_merges_even_for_canary_strategy():
     plan = Mock(); plan.strategy = UpdateStrategy.CANARY
     assert _should_auto_merge(plan, "wave", user_requested=True) is False
