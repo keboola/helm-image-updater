@@ -22,8 +22,9 @@ from .message_generation import (
     generate_pr_title,
     generate_pr_title_prefix,
     format_pr_body_with_metadata,
+    wave_release_search_link,
 )
-from .config import CANARY_STACKS, IGNORED_FOLDERS, DEV_STACK_MAPPING
+from .config import CANARY_STACKS, IGNORED_FOLDERS, DEV_STACK_MAPPING, GITHUB_REPO
 from .cloud_detection import get_stack_cloud_provider
 
 
@@ -645,7 +646,16 @@ def _create_pr_plan(pr_group: Dict[str, Any], plan: UpdatePlan, config: Environm
         metadata=plan.metadata,
         removed_overrides=removed_overrides,
     )
-    
+
+    # Wave PRs: link a PR search that finds every wave PR of this release
+    # (all wave PR titles share the "<chart>@<tag>" substring; no PR numbers needed).
+    if pr_type == 'wave':
+        search_link = wave_release_search_link(
+            GITHUB_REPO, plan.helm_chart, plan.image_tag, plan.extra_tags
+        )
+        pr_body += f"\n\n### Release\n[All wave PRs of this release]({search_link})"
+
+
     # Determine auto-merge
     auto_merge = _should_auto_merge(plan, pr_group['pr_type'], config.automerge)
     
