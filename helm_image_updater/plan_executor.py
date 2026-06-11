@@ -5,6 +5,7 @@ from typing import Dict, List, Optional
 from .models import UpdatePlan, ExecutionResult
 from .io_layer import IOLayer
 from .manifest import build_manifest, manifest_block
+from .exceptions import AutoApproveError
 
 _PR_NUM_RE = re.compile(r"/pull/(\d+)")
 
@@ -106,6 +107,19 @@ def _execute_pr_plans(plan: UpdatePlan, io_layer: IOLayer, result: ExecutionResu
                 auto_merge=pr_plan.auto_merge,
                 labels=pr_plan.labels,
             )
+        except AutoApproveError as exc:
+            if pr_plan.wave_number is None or not exc.pr_url:
+                raise  # non-wave keeps historical behavior; no pr_url -> treat as creation failure
+            # The PR EXISTS (creation succeeded; only the post-create CODEOWNERS
+            # auto-approval failed). Keep fanning out and still emit the manifest —
+            # an unapproved wave PR just waits for a human approval before the
+            # promoter can merge it. Treating this as a creation failure would orphan
+            # a labelled, manifest-less anchor the rerun guard cannot see.
+            result.success = False
+            result.errors.append(
+                f"Wave {pr_plan.wave_number} PR created but auto-approve FAILED: {exc}. "
+                f"Approve {exc.pr_url} manually; the release manifest is still emitted.")
+            pr_url = exc.pr_url
         except Exception as exc:
             if pr_plan.wave_number is None:
                 raise  # non-wave plans keep the historical abort-via-catch-all behavior

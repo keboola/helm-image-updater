@@ -135,6 +135,33 @@ def test_executor_wave_creation_exception_caught_breaks_and_reports():
     assert any("waves [2, 3]" in e and "[0, 1]" in e for e in result.errors)
 
 
+def test_executor_wave_auto_approve_failure_keeps_fanout_and_manifest():
+    """AutoApproveError means the PR EXISTS (creation succeeded, only the CODEOWNERS
+    approval failed) — the executor must keep fanning out and still emit the manifest
+    (an unapproved wave PR just waits for a human approval), instead of orphaning a
+    labelled, manifest-less anchor the rerun guard cannot see. Run still fails loudly."""
+    from helm_image_updater.exceptions import AutoApproveError
+    plan = _wave_plan()
+    io = MagicMock()
+    io.create_branch_commit_and_pr.side_effect = [
+        "https://github.com/keboola/kbc-stacks/pull/10",
+        "https://github.com/keboola/kbc-stacks/pull/11",
+        AutoApproveError("approval boom", pr_url="https://github.com/keboola/kbc-stacks/pull/12"),
+        "https://github.com/keboola/kbc-stacks/pull/13",
+    ]
+    result = execute_plan(plan, io)
+
+    assert io.create_branch_commit_and_pr.call_count == 4  # fan-out NOT aborted
+    io.update_pull_request_body.assert_called_once()       # manifest still patched
+    (anchor_num, new_body), _ = io.update_pull_request_body.call_args
+    assert anchor_num == 10
+    manifest = json.loads(JSON_FENCE_RE.findall(new_body)[0])
+    assert manifest["waves"] == {"0": 10, "1": 11, "2": 12, "3": 13}  # incl. the unapproved PR
+    assert result.success is False  # loud: operator must approve manually
+    assert any("auto-approve FAILED" in e and "Wave 2" in e for e in result.errors)
+    assert "https://github.com/keboola/kbc-stacks/pull/12" in result.pr_urls
+
+
 def test_executor_non_wave_creation_exception_still_propagates_to_catch_all():
     """Non-wave plans keep the historical behavior: a raising creation aborts the run via
     execute_plan's catch-all (no per-PR continue/break semantics change)."""
