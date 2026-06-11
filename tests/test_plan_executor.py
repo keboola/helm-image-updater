@@ -41,6 +41,13 @@ def test_executor_patches_wave0_anchor_with_manifest():
     assert manifest["anchorWave"] == 0
     assert manifest["waves"] == {"0": 10, "1": 11, "2": 12, "3": 13}
     assert new_body.startswith("BODY0")  # appended to the original wave-0 body
+    # ST-4035: clickable wave list sits between the original body and the manifest,
+    # so the FIRST ```json fence (asserted above) still parses to the manifest.
+    assert "### Release waves" in new_body
+    assert "- wave 0: #10 (anchor — this PR)" in new_body
+    assert "- wave 1: #11" in new_body
+    assert "- wave 2: #12" in new_body
+    assert "- wave 3: #13" in new_body
 
 
 def test_executor_no_patch_when_not_wave_mode():
