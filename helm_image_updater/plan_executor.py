@@ -5,6 +5,7 @@ from typing import Dict, List, Optional
 from .models import UpdatePlan, ExecutionResult
 from .io_layer import IOLayer
 from .manifest import build_manifest, manifest_block
+from .exceptions import AutoApproveError
 
 _PR_NUM_RE = re.compile(r"/pull/(\d+)")
 
@@ -106,6 +107,19 @@ def _execute_pr_plans(plan: UpdatePlan, io_layer: IOLayer, result: ExecutionResu
                 auto_merge=pr_plan.auto_merge,
                 labels=pr_plan.labels,
             )
+        except AutoApproveError as exc:
+            if pr_plan.wave_number is None or not exc.pr_url:
+                raise  # non-wave keeps historical behavior; no pr_url -> treat as creation failure
+            # The PR EXISTS (creation succeeded; only the post-create CODEOWNERS
+            # auto-approval failed). Keep fanning out and still emit the manifest —
+            # an unapproved wave PR just waits for a human approval before the
+            # promoter can merge it. Treating this as a creation failure would orphan
+            # a labelled, manifest-less anchor the rerun guard cannot see.
+            result.success = False
+            result.errors.append(
+                f"Wave {pr_plan.wave_number} PR created but auto-approve FAILED: {exc}. "
+                f"Approve {exc.pr_url} manually; the release manifest is still emitted.")
+            pr_url = exc.pr_url
         except Exception as exc:
             if pr_plan.wave_number is None:
                 raise  # non-wave plans keep the historical abort-via-catch-all behavior
@@ -142,6 +156,15 @@ def _execute_pr_plans(plan: UpdatePlan, io_layer: IOLayer, result: ExecutionResu
         _patch_anchor_manifest(plan, io_layer, wave_pr_numbers, wave0_body, result)
 
 
+def _wave_links_md(wave_pr_numbers: Dict[int, int]) -> str:
+    """Render a clickable wave -> PR list for the anchor body (#N auto-links on GitHub)."""
+    lines = ["### Release waves"]
+    for wave in sorted(wave_pr_numbers):
+        suffix = " (anchor — this PR)" if wave == 0 else ""
+        lines.append(f"- wave {wave}: #{wave_pr_numbers[wave]}{suffix}")
+    return "\n".join(lines)
+
+
 def _patch_anchor_manifest(plan: UpdatePlan, io_layer: IOLayer, wave_pr_numbers: Dict[int, int],
                             wave0_body: Optional[str], result: ExecutionResult) -> None:
     """Build the v1 manifest from the collected {wave -> PR#} and patch the wave-0 body.
@@ -166,7 +189,8 @@ def _patch_anchor_manifest(plan: UpdatePlan, io_layer: IOLayer, wave_pr_numbers:
         app=ctx["app"], instance_id=ctx["instance_id"], display_name=ctx["display_name"],
         waves=wave_pr_numbers, source_sha=ctx.get("source_sha"), source_pr=ctx.get("source_pr"),
     )
-    new_body = f"{wave0_body}\n\n{manifest_block(manifest)}"
+    links_md = _wave_links_md(wave_pr_numbers)
+    new_body = f"{wave0_body}\n\n{links_md}\n\n{manifest_block(manifest)}"
     try:
         io_layer.update_pull_request_body(anchor, new_body)
     except Exception as exc:

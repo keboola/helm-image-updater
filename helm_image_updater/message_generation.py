@@ -6,6 +6,7 @@ This module contains no side effects - only text formatting logic.
 """
 
 from typing import List, Dict, Optional, Any
+from urllib.parse import quote
 
 from .stack_classification import classify_stack
 from .models import UpdateStrategy
@@ -106,6 +107,57 @@ def generate_pr_title_prefix(
         return "[prod sync]"
 
 
+def build_tag_string(
+    helm_chart: str,
+    image_tag: str,
+    extra_tags: Optional[List[Dict[str, str]]]
+) -> str:
+    """
+    Build the chart+tags string used in PR titles (all types, via generate_pr_title)
+    and quoted by the wave release-search link. Wave PR titles embed it verbatim,
+    so the quoted-phrase search matches every wave PR of a release.
+
+    Pure function returning e.g. "connection@production-abc path@value".
+
+    Args:
+        helm_chart: Name of the Helm chart
+        image_tag: The image tag
+        extra_tags: Optional list of extra tags
+
+    Returns:
+        Tag string of the form "<chart>@<tag> <path>@<value> ..."
+    """
+    image_tag_str = (f"@{image_tag}" if image_tag else "") + "".join(
+        f" {tag['path']}@{tag['value']}" for tag in (extra_tags or [])
+    )
+    return f"{helm_chart}{image_tag_str}"
+
+
+def wave_release_search_link(
+    repo_full_name: str,
+    helm_chart: str,
+    image_tag: str,
+    extra_tags: Optional[List[Dict[str, str]]]
+) -> str:
+    """
+    Build a GitHub PR-search URL matching every wave PR of this release.
+
+    Pure function. All wave PR titles contain the exact chart+tags substring,
+    so a quoted-phrase search finds all of them without knowing PR numbers.
+
+    Args:
+        repo_full_name: GitHub repo as "owner/repo"
+        helm_chart: Name of the Helm chart
+        image_tag: The image tag
+        extra_tags: Optional list of extra tags
+
+    Returns:
+        Search URL string
+    """
+    phrase = f'is:pr "{build_tag_string(helm_chart, image_tag, extra_tags)}"'
+    return f"https://github.com/{repo_full_name}/pulls?q={quote(phrase, safe='')}"
+
+
 def generate_pr_title(
     pr_title_prefix: str,
     helm_chart: str,
@@ -115,22 +167,18 @@ def generate_pr_title(
 ) -> str:
     """
     Generate a complete PR title.
-    
+
     Args:
         pr_title_prefix: The prefix for the PR title
         helm_chart: Name of the Helm chart
         image_tag: The image tag
         extra_tags: Optional list of extra tags
         target_stacks: List of target stacks
-        
+
     Returns:
         Complete PR title string
     """
-    # Build tag string representation
-    image_tag_str = (f"@{image_tag}" if image_tag else "") + "".join(
-        f" {tag['path']}@{tag['value']}" for tag in (extra_tags or [])
-    )
-    
+
     # Determine stack description for title
     if len(target_stacks) == 1:
         stack_desc = f" in {target_stacks[0]}"
@@ -145,8 +193,9 @@ def generate_pr_title(
             stack_desc = ""
     else:
         stack_desc = ""
-    
-    return f"{pr_title_prefix} {helm_chart}{image_tag_str}{stack_desc}".strip()
+
+    tag_string = build_tag_string(helm_chart, image_tag, extra_tags)
+    return f"{pr_title_prefix} {tag_string}{stack_desc}".strip()
 
 
 def format_pr_body_with_metadata(

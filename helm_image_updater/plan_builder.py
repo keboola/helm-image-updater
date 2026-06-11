@@ -18,12 +18,14 @@ from .io_layer import IOLayer
 from .tag_classification import detect_tag_type, TagType
 from .stack_classification import classify_stack, get_dev_stacks
 from .message_generation import (
+    build_tag_string,
     generate_commit_message,
     generate_pr_title,
     generate_pr_title_prefix,
     format_pr_body_with_metadata,
+    wave_release_search_link,
 )
-from .config import CANARY_STACKS, IGNORED_FOLDERS, DEV_STACK_MAPPING
+from .config import CANARY_STACKS, IGNORED_FOLDERS, DEV_STACK_MAPPING, GITHUB_REPO
 from .cloud_detection import get_stack_cloud_provider
 
 
@@ -609,9 +611,11 @@ def _create_pr_plan(pr_group: Dict[str, Any], plan: UpdatePlan, config: Environm
     # Generate PR title
     if pr_type == 'wave':
         wave = pr_group['wave_number']
+        # The suffix is the same chart+tags string (incl. extra tags) the release
+        # search link quotes — they must match or the search finds nothing (ST-4035).
         pr_title = (
             f"[{plan.helm_chart} {config.deploy_strategy.value} wave {wave}] "
-            f"{plan.helm_chart}@{plan.image_tag}"
+            f"{build_tag_string(plan.helm_chart, plan.image_tag, plan.extra_tags)}"
         )
     else:
         pr_title_prefix = generate_pr_title_prefix(
@@ -645,7 +649,17 @@ def _create_pr_plan(pr_group: Dict[str, Any], plan: UpdatePlan, config: Environm
         metadata=plan.metadata,
         removed_overrides=removed_overrides,
     )
-    
+
+    # Wave PRs: link a PR search that finds every wave PR of this release. The link
+    # quotes the full chart+tags string (incl. extra tags), which every wave PR title
+    # embeds verbatim (see build_tag_string above); no PR numbers needed.
+    if pr_type == 'wave':
+        search_link = wave_release_search_link(
+            GITHUB_REPO, plan.helm_chart, plan.image_tag, plan.extra_tags
+        )
+        pr_body += f"\n\n### Release\n[All wave PRs of this release]({search_link})"
+
+
     # Determine auto-merge
     auto_merge = _should_auto_merge(plan, pr_group['pr_type'], config.automerge)
     

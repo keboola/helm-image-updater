@@ -183,6 +183,39 @@ def test_create_pr_plan_wave_sets_labels_and_branch_title():
     assert pr_plan.wave_number == 2
 
 
+def test_create_pr_plan_wave_title_includes_extra_tags():
+    """Wave titles must carry the SAME chart+tags string the release search link quotes —
+    with extra tags, otherwise the quoted-phrase search matches nothing (ST-4035)."""
+    config = Mock(); config.automerge = False
+    config.deploy_strategy = DeployStrategy.GRADUAL
+    plan = Mock()
+    plan.strategy = UpdateStrategy.PRODUCTION
+    plan.multi_stage = False
+    plan.helm_chart = "dummy-service"
+    plan.image_tag = "production-abc123"
+    plan.extra_tags = [{"path": "agent.tag", "value": "production-agent-xyz"}]
+    plan.metadata = {}
+
+    fc = Mock(); fc.file_path = "kbc-us-east-1/dummy-service/tag.yaml"
+    group = {
+        'stacks': ["kbc-us-east-1"],
+        'changes': [{"stack": "kbc-us-east-1", "file_change": fc, "changes": []}],
+        'base_branch': 'main',
+        'pr_type': 'wave',
+        'wave_number': 2,
+        'labels': ["release:wave:2", "deploy:gradual"],
+    }
+
+    pr_plan = _create_pr_plan(group, plan, config)
+
+    from helm_image_updater.message_generation import build_tag_string
+    tag_string = build_tag_string(plan.helm_chart, plan.image_tag, plan.extra_tags)
+    assert tag_string == "dummy-service@production-abc123 agent.tag@production-agent-xyz"
+    # The searchable phrase must appear verbatim in the title.
+    assert tag_string in pr_plan.pr_title
+    assert pr_plan.pr_title.startswith("[dummy-service gradual wave 2] ")
+
+
 def test_wave_never_auto_merges_even_for_canary_strategy():
     plan = Mock(); plan.strategy = UpdateStrategy.CANARY
     assert _should_auto_merge(plan, "wave", user_requested=True) is False
@@ -350,3 +383,66 @@ def test_wave_grouping_excludes_e2e_stacks():
     all_stacks = [s for g in groups for s in g["stacks"]]
     assert "foo-bar-e2e" not in all_stacks
     assert len(groups) == 4
+
+
+# --- ST-4035: release search link in wave PR bodies --------------------------
+
+from unittest.mock import patch
+from helm_image_updater.message_generation import wave_release_search_link
+
+
+def _pr_plan_mocks(pr_type, wave_number=None):
+    config = Mock(); config.automerge = False
+    config.deploy_strategy = DeployStrategy.GRADUAL
+    plan = Mock()
+    plan.strategy = UpdateStrategy.PRODUCTION
+    plan.multi_stage = False
+    plan.helm_chart = "dummy-service"
+    plan.image_tag = "production-abc123"
+    plan.extra_tags = [{"path": "agent.tag", "value": "production-xyz"}]
+    plan.metadata = {}
+
+    fc = Mock(); fc.file_path = "kbc-us-east-1/dummy-service/tag.yaml"
+    group = {
+        'stacks': ["kbc-us-east-1"],
+        'changes': [{"stack": "kbc-us-east-1", "file_change": fc, "changes": []}],
+        'base_branch': 'main',
+        'pr_type': pr_type,
+    }
+    if wave_number is not None:
+        group['wave_number'] = wave_number
+        group['labels'] = [f"release:wave:{wave_number}", "deploy:gradual"]
+    return group, plan, config
+
+
+def test_wave_release_search_link_quotes_full_tag_string():
+    link = wave_release_search_link(
+        "mock-org/mock-repo",
+        "dummy-service",
+        "production-abc123",
+        [{"path": "agent.tag", "value": "production-xyz"}],
+    )
+    assert link == (
+        "https://github.com/mock-org/mock-repo/pulls?q="
+        "is%3Apr%20%22dummy-service%40production-abc123%20agent.tag%40production-xyz%22"
+    )
+
+
+def test_wave_pr_body_contains_release_search_link():
+    group, plan, config = _pr_plan_mocks('wave', wave_number=1)
+    with patch("helm_image_updater.plan_builder.GITHUB_REPO", "mock-org/mock-repo"):
+        pr_plan = _create_pr_plan(group, plan, config)
+    assert "### Release" in pr_plan.pr_body
+    assert (
+        "[All wave PRs of this release]("
+        "https://github.com/mock-org/mock-repo/pulls?q="
+        "is%3Apr%20%22dummy-service%40production-abc123%20agent.tag%40production-xyz%22)"
+    ) in pr_plan.pr_body
+
+
+def test_non_wave_pr_body_has_no_release_search_link():
+    group, plan, config = _pr_plan_mocks('standard')
+    with patch("helm_image_updater.plan_builder.GITHUB_REPO", "mock-org/mock-repo"):
+        pr_plan = _create_pr_plan(group, plan, config)
+    assert "All wave PRs of this release" not in pr_plan.pr_body
+    assert "### Release\n" not in pr_plan.pr_body
