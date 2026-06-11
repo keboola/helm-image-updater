@@ -650,8 +650,9 @@ def _create_pr_plan(pr_group: Dict[str, Any], plan: UpdatePlan, config: Environm
         removed_overrides=removed_overrides,
     )
 
-    # Wave PRs: link a PR search that finds every wave PR of this release
-    # (all wave PR titles share the "<chart>@<tag>" substring; no PR numbers needed).
+    # Wave PRs: link a PR search that finds every wave PR of this release. The link
+    # quotes the full chart+tags string (incl. extra tags), which every wave PR title
+    # embeds verbatim (see build_tag_string above); no PR numbers needed.
     if pr_type == 'wave':
         search_link = wave_release_search_link(
             GITHUB_REPO, plan.helm_chart, plan.image_tag, plan.extra_tags

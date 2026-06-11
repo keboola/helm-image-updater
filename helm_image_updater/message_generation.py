@@ -113,7 +113,9 @@ def build_tag_string(
     extra_tags: Optional[List[Dict[str, str]]]
 ) -> str:
     """
-    Build the chart+tags string shared by all wave PR titles.
+    Build the chart+tags string used in PR titles (all types, via generate_pr_title)
+    and quoted by the wave release-search link. Wave PR titles embed it verbatim,
+    so the quoted-phrase search matches every wave PR of a release.
 
     Pure function returning e.g. "connection@production-abc path@value".
 
