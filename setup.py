@@ -49,6 +49,6 @@ setup(
     python_requires=">=3.13",
     description="Tool for updating Helm chart image tags across different stacks",
     author="Keboola",
-    author_email="michal.kozak@keboola.com",
+    author_email="team-sre@keboola.com ",
     url="https://github.com/keboola/helm-image-updater",
 )
