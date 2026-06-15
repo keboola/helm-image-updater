@@ -100,5 +100,5 @@ runs:
         # $GITHUB_ACTION_PATH points at the action repo checkout (not the caller's
         # workspace), so a consumer's `@vX.Y.Z` pin deterministically runs both this
         # action.yaml and the matching Python code from the same commit.
-        pip install "$GITHUB_ACTION_PATH"
+        python -m pip install "$GITHUB_ACTION_PATH"
         helm-image-updater

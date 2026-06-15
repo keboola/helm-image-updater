@@ -179,7 +179,7 @@ jobs:
         with:
           user: bot
 
-      - uses: keboola/helm-image-updater@main
+      - uses: keboola/helm-image-updater@v0.15.0
         with:
           helm-chart: ${{ inputs.helm-chart }}
           image-tag: ${{ inputs.image-tag }}
