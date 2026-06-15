@@ -38,7 +38,7 @@ else:
 
 setup(
     name="helm_image_updater",
-    version="0.2.0",
+    version="0.15.0",
     packages=find_packages(),
     install_requires=requirements,
     entry_points={
@@ -49,6 +49,6 @@ setup(
     python_requires=">=3.13",
     description="Tool for updating Helm chart image tags across different stacks",
     author="Keboola",
-    author_email="michal.kozak@keboola.com",
+    author_email="team-sre@keboola.com ",
     url="https://github.com/keboola/helm-image-updater",
 )
