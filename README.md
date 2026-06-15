@@ -80,10 +80,10 @@ Dry run:
 
 ### GitHub Actions
 
-Minimal usage example:
+Minimal usage example (always pin to a released version — see [Releasing](#releasing); the action runs the code from the pinned tag):
 
 ```yaml
-- uses: "keboola/helm-image-updater@main"
+- uses: "keboola/helm-image-updater@v0.15.0"
   with:
     helm-chart: "dummy-service"
     image-tag: "dev-b10536c41180e420eaf083451a1ddee132f512c6"
@@ -287,6 +287,42 @@ If `argocdApplication` only contained `appManifestsRevision`, the entire block i
 
 > **Prerequisite (wave strategies):** the deploy token needs `Issues: write` (PR labels go through the Issues API), and release-promoter's merge identity needs `Contents: write` + `Pull requests: write` and must be a bypass actor on the target branch's ruleset.
 
+## Releasing
+
+A release ships **one coherent version**: the pinned tag determines both the `action.yaml`
+orchestration and the matching Python code (the action installs from its own source at that
+tag — there is no separate "latest package" that can drift).
+
+To cut a new release:
+
+1. **Merge your change into `main`** (PR reviewed, unit tests + E2E green).
+2. **Bump the version** in [`setup.py`](setup.py) (`version="X.Y.Z"`) to the new semver.
+   This is normally part of the same PR. CI **fails the release** if the git tag does not
+   match this version.
+3. **Tag and push:**
+
+   ```bash
+   git tag vX.Y.Z
+   git push origin vX.Y.Z
+   ```
+
+   The [release workflow](.github/workflows/main.yaml) then: runs the tests → verifies the
+   tag matches `setup.py` → builds the sdist → publishes a GitHub Release with auto-generated
+   notes. Only plain semver tags (`vX.Y.Z`) trigger a release; pre-release tags do not.
+4. **Bump the consumers.** In `kbc-stacks` (and any other repo using this action), update
+   the pin to the new tag:
+
+   ```yaml
+   - uses: keboola/helm-image-updater@vX.Y.Z   # was @vA.B.C
+   ```
+
+   Consumers stay on their pinned version until you deliberately bump it — a HIU release does
+   not change anyone's behavior until they move the pin.
+
+> **Why the version must be bumped before tagging:** the package version lives in `setup.py`
+> and the release job refuses to publish a tag whose number disagrees with it, so the GitHub
+> Release, the git tag, and `pip show helm_image_updater` always agree.
+
 ## Development
 
 Create virtual environment:
@@ -304,64 +340,21 @@ Run tests:
     pip install pytest
     pytest tests/
 
-### Testing Changes in sre-playground
+### Testing a branch before release
 
-To test your changes in the real environment (sre-playground repository) before creating a release:
+The action installs its Python code from its **own checked-out source at the ref you pin** (`pip install "$GITHUB_ACTION_PATH"`). That means testing an unreleased branch needs no `action.yaml` surgery — just point a consumer at your branch:
 
-1. **Modify action.yaml** to use source code instead of release:
+```yaml
+- uses: keboola/helm-image-updater@your-feature-branch
+  with:
+    helm-chart: metastore
+    image-tag: canary-orion-metastore-0.0.5
+    github-token: ${{ secrets.GITHUB_TOKEN }}
+```
 
-   ```yaml
-   # Comment out the release downloader
-   # - uses: robinraju/release-downloader@v1.9
-   #   with:
-   #     repository: "keboola/helm-image-updater"
-   #     latest: true
+Both `action.yaml` and the Python code then come from `your-feature-branch`, in lockstep.
 
-   # Add source checkout and installation
-   - name: Checkout helm-image-updater source
-     uses: actions/checkout@v4
-     with:
-       repository: keboola/helm-image-updater
-       ref: your-feature-branch-name  # Replace with your branch
-       path: helm-image-updater-src
-
-   - name: Install helm-image-updater from source
-     shell: bash
-     run: |
-       echo "Installing helm-image-updater from source code..."
-       cd helm-image-updater-src
-       pip install -e .
-   ```
-
-   And update the final step to remove the pip install line:
-
-   ```yaml
-   - name: Update image tags and create PRs
-     shell: bash
-     env:
-       # ... environment variables ...
-     run: |
-       # pip install helm_image_updater-*.tar.gz  # Comment this out
-       helm-image-updater
-   ```
-
-2. **Commit and push your feature branch** with the changes
-
-3. **In sre-playground**, update the workflow to use your branch:
-
-   ```yaml
-   - uses: keboola/helm-image-updater@your-feature-branch
-     with:
-       helm-chart: metastore
-       image-tag: canary-orion-metastore-0.0.5
-       github-token: ${{ secrets.GITHUB_TOKEN }}
-   ```
-
-4. **Test your changes** by running the workflow in sre-playground
-
-5. **When satisfied**, revert the action.yaml changes and create a proper release
-
-This approach allows you to test fixes in the "real" environment without needing to create releases for testing purposes.
+The preferred way to validate a branch is the **E2E suite** in [helm-image-updater-testing](https://github.com/keboola/helm-image-updater-testing/actions/workflows/test-suite.yaml) — trigger the "Test suite" workflow and pass your branch name. See [e2e tests](#e2e-tests) below.
 
 ## Testing
 

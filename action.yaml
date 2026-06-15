@@ -63,12 +63,6 @@ runs:
       with:
         python-version: '3.13'
 
-    - uses: robinraju/release-downloader@v1.12
-      with:
-        repository: "keboola/helm-image-updater"
-        latest: true
-        fileName: "*.tar.gz"
-
     - name: Configure git and fetch branches
       shell: bash
       run: |
@@ -102,5 +96,9 @@ runs:
         GH_APPROVE_TOKEN: ${{ inputs.approve-token }}
         COMMIT_PIPELINE_SHA: ${{ inputs.commit-sha }}
       run: |
-        pip install helm_image_updater-*.tar.gz
+        # Install HIU from this action's OWN checked-out source at the pinned ref.
+        # $GITHUB_ACTION_PATH points at the action repo checkout (not the caller's
+        # workspace), so a consumer's `@vX.Y.Z` pin deterministically runs both this
+        # action.yaml and the matching Python code from the same commit.
+        pip install "$GITHUB_ACTION_PATH"
         helm-image-updater
