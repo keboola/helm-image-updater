@@ -23,7 +23,7 @@ from .exceptions import AutoMergeError, AutoApproveError
 class IOLayer:
     """Handles all I/O operations for the application."""
     
-    def __init__(self, repo: Repo, github_repo: Any, dry_run: bool = False, *, approve_github_repo: Any):
+    def __init__(self, repo: Repo, github_repo: Any, dry_run: bool = False, *, approve_github_repo: Any, service: Optional[str] = None):
         """Initialize the I/O layer.
 
         Args:
@@ -31,11 +31,15 @@ class IOLayer:
             github_repo: GitHub repository object
             dry_run: If True, don't perform actual writes
             approve_github_repo: GitHub repository object authenticated as a CODEOWNERS team member, used to auto-approve PRs
+            service: Name of the helm chart being updated this run. When set, every PR
+                created via this layer is labelled `app:<service>` so PRs can be filtered
+                by service. Constant for a run (HIU updates one chart per invocation).
         """
         self.repo = repo
         self.github_repo = github_repo
         self.dry_run = dry_run
         self.approve_github_repo = approve_github_repo
+        self.service = service
     
     # -----------------------------------------------------------------------------
     # File System Operations
@@ -262,6 +266,15 @@ class IOLayer:
         print(f"🚀 Creating PR: '{title}'")
         print(f"   - Base: {base_branch}, Head: {branch_name}")
         print(f"   - Auto-merge requested: {'YES' if auto_merge else 'NO'}")
+
+        # Universal `app:<service>` label: every PR HIU creates is tagged with the
+        # chart being updated so PRs can be filtered by service (ST-4128). Injected at
+        # this chokepoint (not per-caller) so no PR-creation path can miss it.
+        if self.service:
+            app_label = f"app:{self.service}"
+            labels = list(labels) if labels else []
+            if app_label not in labels:
+                labels.append(app_label)
 
         if self.dry_run:
             merge_status = "and auto-merge" if auto_merge else "without auto-merge"
