@@ -425,10 +425,17 @@ def _group_changes_for_prs(
         return _group_changes_by_wave(stack_changes, plan, config, io_layer)
 
     # Promoter-managed `standard`: 2-wave dev→prod release (ST-4126). Fires ONLY on
-    # explicit DEPLOY_STRATEGY=standard + automerge=false (config.promoter_managed_standard);
-    # the legacy default standard (empty strategy / automerge=true) falls through to the
+    # explicit DEPLOY_STRATEGY=standard + automerge=false (config.promoter_managed_standard)
+    # AND a full PRODUCTION/DEV deploy. CANARY and OVERRIDE are orthogonal UpdateStrategy
+    # axes (driven by the tag / override_stack, not the deploy-strategy) and MUST keep their
+    # own handling below — otherwise a canary tag or an override-stack deploy that also
+    # carries standard+automerge=false would be hijacked into the 2-wave path.
+    # The legacy default standard (empty strategy / automerge=true) falls through to the
     # historical single-PR / per-stack grouping below.
-    if getattr(config, "promoter_managed_standard", False):
+    if getattr(config, "promoter_managed_standard", False) and plan.strategy in (
+        UpdateStrategy.PRODUCTION,
+        UpdateStrategy.DEV,
+    ):
         return _group_changes_standard_2wave(stack_changes, plan, config, io_layer)
 
     if plan.strategy == UpdateStrategy.CANARY:

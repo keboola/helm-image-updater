@@ -172,6 +172,38 @@ def test_group_changes_for_prs_legacy_standard_automerge_false_per_stack_unchang
         assert g.get("wave_number") is None
 
 
+def test_group_changes_for_prs_override_not_hijacked_by_standard():
+    # ST-4126 routing guard: explicit standard + automerge=false but an OVERRIDE
+    # deploy must stay the override single-PR — the 2-wave standard path is for
+    # full PRODUCTION/DEV deploys only, never override.
+    config = _std_config()  # promoter_managed_standard=True
+    plan = _std_plan()
+    plan.strategy = UpdateStrategy.OVERRIDE
+    changes = [_stack_change("kbc-us-east-1")]
+
+    groups = _group_changes_for_prs(changes, plan, config, Mock())
+    assert len(groups) == 1
+    assert groups[0]["pr_type"] == "standard"
+    assert groups[0].get("wave_number") is None
+    assert groups[0].get("labels", []) == []
+
+
+def test_group_changes_for_prs_canary_not_hijacked_by_standard():
+    # ST-4126 routing guard: a CANARY tag must stay a canary deploy even when
+    # standard + automerge=false is set — the standard 2-wave path must NOT preempt it.
+    config = _std_config()
+    config.image_tag = "canary-orion-abc123"
+    plan = _std_plan()
+    plan.strategy = UpdateStrategy.CANARY
+    plan.image_tag = "canary-orion-abc123"
+    changes = [_stack_change(s) for s in DEV_STACKS + PROD_STACKS]
+
+    groups = _group_changes_for_prs(changes, plan, config, Mock())
+    assert len(groups) == 1
+    assert groups[0]["pr_type"] == "canary"
+    assert all(g.get("wave_number") is None for g in groups)
+
+
 # --- prepare_plan: manifest-context + idempotency-guard wiring (integration) -------
 
 
