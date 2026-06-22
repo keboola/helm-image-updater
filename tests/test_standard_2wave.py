@@ -18,6 +18,7 @@ from helm_image_updater.plan_builder import (
     prepare_plan,
     _group_changes_for_prs,
     _group_changes_standard_2wave,
+    _should_auto_merge,
 )
 
 
@@ -202,6 +203,18 @@ def test_group_changes_for_prs_canary_not_hijacked_by_standard():
     assert len(groups) == 1
     assert groups[0]["pr_type"] == "canary"
     assert all(g.get("wave_number") is None for g in groups)
+
+
+def test_canary_auto_merges_regardless_of_automerge_flag():
+    # ST-4126 rollout safety: canary must merge RIGHT AWAY via HIU regardless of the
+    # automerge flag. The promoter only discovers `release:wave:0` anchors on
+    # kbc-stacks@main, while a canary PR targets the canary-* branch — so if HIU did NOT
+    # auto-merge it, the canary deploy would never land. This MUST stay true even once the
+    # standard rollout (ST-4131) makes automerge=false the default.
+    plan = Mock()
+    plan.strategy = UpdateStrategy.CANARY
+    assert _should_auto_merge(plan, "canary", user_requested=False) is True
+    assert _should_auto_merge(plan, "canary", user_requested=True) is True
 
 
 # --- prepare_plan: manifest-context + idempotency-guard wiring (integration) -------
