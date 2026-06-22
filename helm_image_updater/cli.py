@@ -57,7 +57,7 @@ def main():
         approve_client = Github(config.approve_token)
         approve_github_repo = approve_client.get_repo(GITHUB_REPO)
 
-        io_layer = IOLayer(repo, github_repo, config.dry_run, approve_github_repo=approve_github_repo)
+        io_layer = IOLayer(repo, github_repo, config.dry_run, approve_github_repo=approve_github_repo, service=config.helm_chart)
         
         # Step 4: Prepare plan (reads files, calculates changes)
         plan = prepare_plan(config, io_layer)

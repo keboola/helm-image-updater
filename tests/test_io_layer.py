@@ -418,3 +418,132 @@ def test_find_open_release_anchors_returns_number_and_body():
     anchors = _io(gh).find_open_release_anchors()
     gh.get_issues.assert_called_once_with(state="open", labels=["release:wave:0"])
     assert anchors == [(7, "BODY")]
+
+
+# ---------------------------------------------------------------------------
+# ST-4128: every PR HIU creates carries the `app:<service>` label
+# ---------------------------------------------------------------------------
+
+def _service_io(github_repo, *, service, dry_run=False):
+    """IOLayer wired with a service (chart) name, like the CLI does."""
+    io = IOLayer(repo=MagicMock(), github_repo=github_repo, dry_run=dry_run,
+                 approve_github_repo=MagicMock(), service=service)
+    io.push_branch = MagicMock()  # avoid real git push
+    return io
+
+
+def _make_pr(gh, number=1):
+    pr = MagicMock()
+    pr.html_url = f"http://x/{number}"
+    pr.number = number
+    pr.mergeable = True
+    gh.create_pull.return_value = pr
+    return pr
+
+
+def test_create_pull_request_injects_app_label_when_no_labels_given():
+    """A standard PR (labels=None) still gets app:<service> provisioned + applied."""
+    gh = MagicMock()
+    pr = _make_pr(gh)
+    io = _service_io(gh, service="job-queue-daemon")
+
+    io.create_pull_request(
+        title="t", body="b", branch_name="br", base_branch="main", auto_merge=True,
+    )
+
+    pr.add_to_labels.assert_called_once_with("app:job-queue-daemon")
+    gh.get_label.assert_any_call("app:job-queue-daemon")
+
+
+def test_create_pull_request_appends_app_label_to_wave_labels():
+    """A wave/promoter PR keeps its labels AND gains app:<service> (universal)."""
+    gh = MagicMock()
+    # release:wave: label is missing -> must be provisioned
+    def _get_label(name):
+        if name.startswith("release:wave:") or name.startswith("app:"):
+            raise GithubException(404, {"message": "Not Found"}, None)
+        return MagicMock()
+    gh.get_label.side_effect = _get_label
+    pr = _make_pr(gh)
+    io = _service_io(gh, service="connection")
+
+    io.create_pull_request(
+        title="t", body="b", branch_name="br", base_branch="main", auto_merge=True,
+        labels=["release:wave:2", "deploy:gradual"],
+    )
+
+    pr.add_to_labels.assert_called_once_with(
+        "release:wave:2", "deploy:gradual", "app:connection"
+    )
+    # the new app:* label was provisioned (create-if-missing)
+    created = {c.kwargs.get("name") for c in gh.create_label.call_args_list}
+    assert "app:connection" in created
+
+
+def test_create_pull_request_does_not_duplicate_app_label():
+    """If app:<service> is already in the caller's labels, it isn't duplicated."""
+    gh = MagicMock()
+    pr = _make_pr(gh)
+    io = _service_io(gh, service="connection")
+
+    io.create_pull_request(
+        title="t", body="b", branch_name="br", base_branch="main", auto_merge=True,
+        labels=["app:connection", "deploy:standard"],
+    )
+
+    pr.add_to_labels.assert_called_once_with("app:connection", "deploy:standard")
+
+
+def test_create_pull_request_no_service_keeps_legacy_behavior():
+    """When no service is configured, behavior is unchanged (no app:* label)."""
+    gh = MagicMock()
+    pr = _make_pr(gh)
+    io = IOLayer(repo=MagicMock(), github_repo=gh, dry_run=False,
+                 approve_github_repo=MagicMock())  # no service
+    io.push_branch = MagicMock()
+
+    io.create_pull_request(
+        title="t", body="b", branch_name="br", base_branch="main", auto_merge=True,
+        labels=["deploy:standard"],
+    )
+
+    pr.add_to_labels.assert_called_once_with("deploy:standard")
+
+
+def test_create_pull_request_dry_run_reports_app_label():
+    """Dry run surfaces the app:<service> label too."""
+    gh = MagicMock()
+    io = _service_io(gh, service="connection", dry_run=True)
+
+    result = io.create_pull_request(
+        title="t", body="b", branch_name="br", base_branch="main", auto_merge=True,
+        labels=["deploy:standard"],
+    )
+
+    assert result is None
+    gh.create_pull.assert_not_called()
+
+
+def test_create_branch_commit_and_pr_carries_app_label():
+    """The high-level wrapper also injects app:<service>."""
+    gh = MagicMock()
+    pr = _make_pr(gh)
+    io = _service_io(gh, service="gooddata-cn-provisioning")
+    # neutralize the branch/commit git operations the wrapper performs
+    io.checkout_branch = MagicMock()
+    io.add_files = MagicMock()
+    io.commit = MagicMock()
+
+    io.create_branch_commit_and_pr(
+        branch_name="br",
+        files_to_commit=["f"],
+        commit_message="m",
+        pr_title="t",
+        pr_body="b",
+        auto_merge=True,
+        labels=["deploy:standard"],
+    )
+
+    pr.add_to_labels.assert_called_once_with(
+        "deploy:standard", "app:gooddata-cn-provisioning"
+    )
