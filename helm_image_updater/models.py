@@ -25,11 +25,24 @@ class DeployStrategy(Enum):
 
     @property
     def is_wave(self) -> bool:
+        """Strategies routed through the strict waves-0..3 grouping
+        (`_group_changes_by_wave`). MUST exclude STANDARD — its 2-wave dev→prod
+        grouping is contiguous-from-0 by construction and must not hit the
+        0..3-required guard."""
         return self in (
             DeployStrategy.GRADUAL,
             DeployStrategy.CRITICAL,
             DeployStrategy.CRITICAL_MANUAL_GATE,
         )
+
+    @property
+    def is_promoter_managed(self) -> bool:
+        """Strategies whose PRs the release-promoter owns (unmerged, labelled,
+        carrying a wave-0 manifest). Superset of `is_wave`: also includes STANDARD,
+        which ST-4126 emits as a promoter-managed 2-wave dev→prod release when run
+        unmerged. Used for the manifest-context / idempotency-guard wiring — NOT for
+        routing into `_group_changes_by_wave` (that keys off `is_wave`)."""
+        return self.is_wave or self is DeployStrategy.STANDARD
 
 
 @dataclass
