@@ -420,6 +420,13 @@ def _group_changes_for_prs(
     if config.deploy_strategy.is_wave:
         return _group_changes_by_wave(stack_changes, plan, config, io_layer)
 
+    # Promoter-managed `standard`: 2-wave dev→prod release (ST-4126). Fires ONLY on
+    # explicit DEPLOY_STRATEGY=standard + automerge=false (config.promoter_managed_standard);
+    # the legacy default standard (empty strategy / automerge=true) falls through to the
+    # historical single-PR / per-stack grouping below.
+    if getattr(config, "promoter_managed_standard", False):
+        return _group_changes_standard_2wave(stack_changes, plan, config, io_layer)
+
     if plan.strategy == UpdateStrategy.CANARY:
         # Canary: always one PR
         return [{
@@ -544,6 +551,42 @@ def _group_changes_by_wave(stack_changes, plan, config, io_layer):
     groups = []
     for wave in sorted(by_wave):
         changes = by_wave[wave]
+        groups.append({
+            'stacks': [sc['stack'] for sc in changes],
+            'changes': changes,
+            'base_branch': 'main',
+            'pr_type': 'wave',
+            'wave_number': wave,
+            'labels': [wave_label(wave), deploy_lbl],
+        })
+    return groups
+
+
+def _group_changes_standard_2wave(stack_changes, plan, config, io_layer):
+    """Group a promoter-managed `standard` deploy into a 2-wave dev→prod release (ST-4126).
+
+    wave 0 = all dev stacks (the anchor, carries the manifest), wave 1 = all prod stacks.
+    The cloud dimension is collapsed entirely (no per-cloud split, no rollout_wave lookup).
+
+    1-wave fallback: an app present in only one tier (no dev stacks, or no prod stacks)
+    emits a single wave-0 PR (the promoter handles 1-wave releases count-agnostically).
+    Wave numbers are contiguous-from-0 by construction.
+    """
+    deploy_lbl = deploy_label(config.deploy_strategy)
+
+    # Never roll an e2e stack into a wave (defensive — known e2e are also in EXCLUDED_STACKS).
+    stack_changes = [sc for sc in stack_changes if not sc['stack'].endswith('-e2e')]
+
+    dev_changes = [sc for sc in stack_changes if classify_stack(sc['stack']).is_dev]
+    prod_changes = [sc for sc in stack_changes if not classify_stack(sc['stack']).is_dev]
+
+    # Build (tier-changes) in dev→prod order, dropping empty tiers, then number the
+    # surviving tiers contiguously from 0. With both tiers present: dev=0, prod=1.
+    # With only one tier present: that tier becomes wave 0 (1-wave fallback).
+    tiers = [t for t in (dev_changes, prod_changes) if t]
+
+    groups = []
+    for wave, changes in enumerate(tiers):
         groups.append({
             'stacks': [sc['stack'] for sc in changes],
             'changes': changes,
