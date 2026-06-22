@@ -91,8 +91,12 @@ def prepare_plan(config: EnvironmentConfig, io_layer: IOLayer) -> UpdatePlan:
     # Group changes into PRs
     pr_groups = _group_changes_for_prs(stack_changes, plan, config, io_layer)
 
-    # Wave mode: derive the manifest identity, then guard against a duplicate fan-out.
-    if config.deploy_strategy.is_wave and pr_groups:
+    # Promoter-managed modes (wave strategies + promoter-managed `standard`, ST-4126):
+    # derive the manifest identity, then guard against a duplicate fan-out.
+    promoter_managed = config.deploy_strategy.is_wave or getattr(
+        config, "promoter_managed_standard", False
+    )
+    if promoter_managed and pr_groups:
         plan.manifest_context = _build_manifest_context(plan)
         if not config.dry_run:
             _guard_release_not_already_open(plan.manifest_context["instance_id"], io_layer)

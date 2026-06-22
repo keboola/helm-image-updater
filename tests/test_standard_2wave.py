@@ -5,12 +5,17 @@ The cloud dimension is collapsed (no per-cloud split). Activation: explicit
 DEPLOY_STRATEGY=standard + automerge=false on a production/semver tag.
 """
 
+import os
 from unittest.mock import Mock
 
 import pytest
+import yaml
 
 from helm_image_updater.models import UpdateStrategy, DeployStrategy
+from helm_image_updater.environment import EnvironmentConfig
+from helm_image_updater.io_layer import IOLayer
 from helm_image_updater.plan_builder import (
+    prepare_plan,
     _group_changes_for_prs,
     _group_changes_standard_2wave,
 )
@@ -165,3 +170,118 @@ def test_group_changes_for_prs_legacy_standard_automerge_false_per_stack_unchang
     for g in groups:
         assert g["pr_type"] == "standard"
         assert g.get("wave_number") is None
+
+
+# --- prepare_plan: manifest-context + idempotency-guard wiring (integration) -------
+
+
+def _make_tag_yaml(path):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("image:\n  tag: old-tag\n")
+
+
+@pytest.fixture
+def std_stacks(tmp_path):
+    """One real dev stack + one real prod stack on disk for a `test-chart` deploy."""
+    dev = tmp_path / "dev-keboola-gcp-us-central1"   # dev (DEV_STACK_MAPPING)
+    prod = tmp_path / "kbc-us-east-1"                 # prod
+    _make_tag_yaml(dev / "test-chart" / "tag.yaml")
+    _make_tag_yaml(prod / "test-chart" / "tag.yaml")
+    return {"base_dir": tmp_path, "dev": dev, "prod": prod}
+
+
+def _io_layer():
+    io = IOLayer(Mock(), Mock(), dry_run=True, approve_github_repo=Mock())
+    return io
+
+
+def test_prepare_plan_standard_sets_manifest_context_and_two_waves(std_stacks):
+    os.chdir(std_stacks["base_dir"])
+    env = {
+        "HELM_CHART": "test-chart",
+        "IMAGE_TAG": "production-abc123",
+        "GH_TOKEN": "t",
+        "GH_APPROVE_TOKEN": "a",
+        "DEPLOY_STRATEGY": "standard",
+        "AUTOMERGE": "false",
+        "DRY_RUN": "true",
+        "TARGET_PATH": str(std_stacks["base_dir"]),
+    }
+    config = EnvironmentConfig.from_env(env)
+    assert config.validate() == []
+    assert config.promoter_managed_standard is True
+
+    plan = prepare_plan(config, _io_layer())
+
+    # Manifest context derived (so the executor can patch the wave-0 anchor).
+    assert plan.manifest_context is not None
+    assert plan.manifest_context["app"] == "test-chart"
+    assert plan.manifest_context["instance_id"].startswith("test-chart-")
+
+    # Two wave PRs (dev=0, prod=1), unmerged, labelled.
+    assert len(plan.pr_plans) == 2
+    by_wave = {p.wave_number: p for p in plan.pr_plans}
+    assert set(by_wave) == {0, 1}
+    assert by_wave[0].auto_merge is False
+    assert by_wave[1].auto_merge is False
+    assert by_wave[0].labels == ["release:wave:0", "deploy:standard"]
+    assert by_wave[1].labels == ["release:wave:1", "deploy:standard"]
+
+
+def test_prepare_plan_standard_invokes_idempotency_guard(std_stacks):
+    # A non-dry-run with an already-open anchor carrying this instanceId must raise.
+    os.chdir(std_stacks["base_dir"])
+    env = {
+        "HELM_CHART": "test-chart",
+        "IMAGE_TAG": "production-abc123",
+        "GH_TOKEN": "t",
+        "GH_APPROVE_TOKEN": "a",
+        "DEPLOY_STRATEGY": "standard",
+        "AUTOMERGE": "false",
+        "DRY_RUN": "false",
+        "TARGET_PATH": str(std_stacks["base_dir"]),
+        "METADATA": __import__("base64").b64encode(
+            __import__("json").dumps({"source": {"sha": "deadbeef0123abc"}}).encode()
+        ).decode(),
+    }
+    config = EnvironmentConfig.from_env(env)
+    assert config.promoter_managed_standard is True
+
+    from helm_image_updater.manifest import build_manifest, manifest_block, compute_instance_id
+
+    iid = compute_instance_id("test-chart", "deadbeef0123abc", "production-abc123")
+    anchor_body = manifest_block(build_manifest(
+        app="test-chart", instance_id=iid, display_name="test-chart@production-abc123",
+        waves={0: 9, 1: 10},
+    ))
+
+    io = IOLayer(Mock(), Mock(), dry_run=False, approve_github_repo=Mock())
+    io.find_open_release_anchors = Mock(return_value=[(9, anchor_body)])
+
+    with pytest.raises(RuntimeError, match="already has an open anchor"):
+        prepare_plan(config, io)
+
+
+def test_prepare_plan_legacy_standard_no_manifest_context(std_stacks):
+    # Default (empty) standard + automerge=true → legacy single PR, NO manifest context.
+    os.chdir(std_stacks["base_dir"])
+    env = {
+        "HELM_CHART": "test-chart",
+        "IMAGE_TAG": "production-abc123",
+        "GH_TOKEN": "t",
+        "GH_APPROVE_TOKEN": "a",
+        "DEPLOY_STRATEGY": "",
+        "AUTOMERGE": "true",
+        "DRY_RUN": "true",
+        "TARGET_PATH": str(std_stacks["base_dir"]),
+    }
+    config = EnvironmentConfig.from_env(env)
+    assert config.promoter_managed_standard is False
+
+    plan = prepare_plan(config, _io_layer())
+    assert plan.manifest_context is None
+    # legacy single PR for all stacks
+    assert len(plan.pr_plans) == 1
+    assert plan.pr_plans[0].wave_number is None
+    assert plan.pr_plans[0].labels == []
