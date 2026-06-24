@@ -274,6 +274,34 @@ def test_prepare_plan_standard_sets_manifest_context_and_two_waves(std_stacks):
     assert by_wave[1].labels == ["release:wave:1", "deploy:standard"]
 
 
+def test_prepare_plan_explicit_standard_ignores_automerge_true(std_stacks):
+    # ST-4126: AUTOMERGE is IGNORED for an EXPLICIT DEPLOY_STRATEGY=standard (same as the
+    # wave strategies). AUTOMERGE=true must NOT revert it to a legacy single-PR deploy — it
+    # still emits the promoter-managed 2-wave release with unmerged wave PRs (which HIU
+    # auto-approves because auto_merge=False, so release-promoter can merge them).
+    os.chdir(std_stacks["base_dir"])
+    env = {
+        "HELM_CHART": "test-chart",
+        "IMAGE_TAG": "production-abc123",
+        "GH_TOKEN": "t",
+        "GH_APPROVE_TOKEN": "a",
+        "DEPLOY_STRATEGY": "standard",
+        "AUTOMERGE": "true",  # explicitly true — must be ignored for explicit standard
+        "DRY_RUN": "true",
+        "TARGET_PATH": str(std_stacks["base_dir"]),
+    }
+    config = EnvironmentConfig.from_env(env)
+    assert config.promoter_managed_standard is True
+
+    plan = prepare_plan(config, _io_layer())
+    assert plan.manifest_context is not None
+    assert len(plan.pr_plans) == 2
+    by_wave = {p.wave_number: p for p in plan.pr_plans}
+    assert set(by_wave) == {0, 1}
+    assert by_wave[0].auto_merge is False
+    assert by_wave[1].auto_merge is False
+
+
 def test_prepare_plan_standard_invokes_idempotency_guard(std_stacks):
     # A non-dry-run with an already-open anchor carrying this instanceId must raise.
     os.chdir(std_stacks["base_dir"])

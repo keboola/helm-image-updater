@@ -155,10 +155,12 @@ def test_promoter_managed_standard_requires_explicit_standard_and_automerge_fals
     assert cfg.multi_stage is False
 
 
-def test_promoter_managed_standard_off_for_explicit_standard_with_automerge():
-    # Explicit standard but automerge=true → legacy single-PR, NOT promoter-managed.
-    cfg = EnvironmentConfig.from_env(_base_env(DEPLOY_STRATEGY="standard", AUTOMERGE="true"))
-    assert cfg.promoter_managed_standard is False
+def test_promoter_managed_standard_ignores_automerge_for_explicit_standard():
+    # Explicit standard → promoter-managed 2-wave regardless of AUTOMERGE (ST-4126):
+    # AUTOMERGE is ignored, exactly like the wave strategies.
+    for automerge in ("true", "false"):
+        cfg = EnvironmentConfig.from_env(_base_env(DEPLOY_STRATEGY="standard", AUTOMERGE=automerge))
+        assert cfg.promoter_managed_standard is True, f"automerge={automerge}"
 
 
 def test_promoter_managed_standard_off_for_default_empty_strategy():

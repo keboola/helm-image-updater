@@ -22,10 +22,10 @@ class EnvironmentConfig:
     dry_run: bool = False
     multi_stage: bool = False
     deploy_strategy: DeployStrategy = DeployStrategy.STANDARD
-    # True only for an EXPLICIT DEPLOY_STRATEGY=standard run that is also unmerged
-    # (automerge=false): the promoter-managed 2-wave dev→prod path (ST-4126). The legacy
-    # default (empty strategy → STANDARD) and any automerge=true run leave this False so
-    # historical single-PR / per-stack behaviour is unchanged.
+    # True for an EXPLICIT DEPLOY_STRATEGY=standard run: the promoter-managed 2-wave
+    # dev→prod path (ST-4126). AUTOMERGE is IGNORED, exactly like the wave strategies. The
+    # legacy default (empty strategy → STANDARD) leaves this False so historical single-PR /
+    # per-stack behaviour is unchanged.
     promoter_managed_standard: bool = False
     _deploy_strategy_error: Optional[str] = field(default=None, init=False, repr=False)
     target_path: str = "."
@@ -94,14 +94,15 @@ class EnvironmentConfig:
 
         automerge = env.get("AUTOMERGE", "true").lower() == "true"
 
-        # Promoter-managed `standard` (ST-4126): the 2-wave dev→prod release fires ONLY on
-        # an EXPLICIT DEPLOY_STRATEGY=standard that is also unmerged (automerge=false).
-        # `raw_strategy` is the empty-string default for the action's unset deploy-strategy,
-        # so the legacy default (empty → STANDARD) never trips this even with automerge=false.
+        # Promoter-managed `standard` (ST-4126): an EXPLICIT DEPLOY_STRATEGY=standard always
+        # emits the 2-wave dev→prod release — AUTOMERGE is IGNORED, exactly like the wave
+        # strategies (gradual/critical/...). The wave PRs are created unmerged (auto_merge=False
+        # ⇒ HIU auto-approves them) and merged later by release-promoter. `raw_strategy` is the
+        # empty-string default for the action's unset deploy-strategy, so the legacy default
+        # (empty → STANDARD) never trips this — it stays the historical single-PR / per-stack flow.
         promoter_managed_standard = (
             raw_strategy == "standard"
             and deploy_strategy == DeployStrategy.STANDARD
-            and not automerge
         )
 
         config = cls(
