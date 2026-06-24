@@ -29,6 +29,19 @@ from .config import CANARY_STACKS, IGNORED_FOLDERS, DEV_STACK_MAPPING, GITHUB_RE
 from .cloud_detection import get_stack_cloud_provider
 
 
+def _is_promoter_managed_standard(config: EnvironmentConfig, plan: UpdatePlan) -> bool:
+    """True iff this run is a promoter-managed `standard` 2-wave release (ST-4126):
+    an explicit DEPLOY_STRATEGY=standard (`config.promoter_managed_standard`, AUTOMERGE
+    ignored) AND a full PRODUCTION/DEV deploy. CANARY and OVERRIDE are orthogonal
+    UpdateStrategy axes (driven by the tag / override_stack) and are NEVER promoter-managed.
+    Keeping this gate in ONE place stops the grouping and the manifest/idempotency-guard
+    wiring from diverging (Copilot review)."""
+    return getattr(config, "promoter_managed_standard", False) and plan.strategy in (
+        UpdateStrategy.PRODUCTION,
+        UpdateStrategy.DEV,
+    )
+
+
 def prepare_plan(config: EnvironmentConfig, io_layer: IOLayer) -> UpdatePlan:
     """
     Prepare a complete execution plan.
@@ -93,9 +106,7 @@ def prepare_plan(config: EnvironmentConfig, io_layer: IOLayer) -> UpdatePlan:
 
     # Promoter-managed modes (wave strategies + promoter-managed `standard`, ST-4126):
     # derive the manifest identity, then guard against a duplicate fan-out.
-    promoter_managed = config.deploy_strategy.is_wave or getattr(
-        config, "promoter_managed_standard", False
-    )
+    promoter_managed = config.deploy_strategy.is_wave or _is_promoter_managed_standard(config, plan)
     if promoter_managed and pr_groups:
         plan.manifest_context = _build_manifest_context(plan)
         if not config.dry_run:
@@ -424,18 +435,13 @@ def _group_changes_for_prs(
     if config.deploy_strategy.is_wave:
         return _group_changes_by_wave(stack_changes, plan, config, io_layer)
 
-    # Promoter-managed `standard`: 2-wave dev→prod release (ST-4126). Fires ONLY on
-    # explicit DEPLOY_STRATEGY=standard + automerge=false (config.promoter_managed_standard)
-    # AND a full PRODUCTION/DEV deploy. CANARY and OVERRIDE are orthogonal UpdateStrategy
-    # axes (driven by the tag / override_stack, not the deploy-strategy) and MUST keep their
-    # own handling below — otherwise a canary tag or an override-stack deploy that also
-    # carries standard+automerge=false would be hijacked into the 2-wave path.
-    # The legacy default standard (empty strategy / automerge=true) falls through to the
-    # historical single-PR / per-stack grouping below.
-    if getattr(config, "promoter_managed_standard", False) and plan.strategy in (
-        UpdateStrategy.PRODUCTION,
-        UpdateStrategy.DEV,
-    ):
+    # Promoter-managed `standard`: 2-wave dev→prod release (ST-4126). See
+    # `_is_promoter_managed_standard` — an explicit DEPLOY_STRATEGY=standard for a full
+    # PRODUCTION/DEV deploy (AUTOMERGE ignored). CANARY and OVERRIDE are orthogonal
+    # UpdateStrategy axes and MUST keep their own handling below (the same predicate gates
+    # the manifest/guard wiring in prepare_plan, so the two can't diverge). The legacy
+    # default standard (empty strategy) falls through to the historical grouping below.
+    if _is_promoter_managed_standard(config, plan):
         return _group_changes_standard_2wave(stack_changes, plan, config, io_layer)
 
     if plan.strategy == UpdateStrategy.CANARY:

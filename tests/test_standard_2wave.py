@@ -9,7 +9,6 @@ import os
 from unittest.mock import Mock
 
 import pytest
-import yaml
 
 from helm_image_updater.models import UpdateStrategy, DeployStrategy
 from helm_image_updater.environment import EnvironmentConfig
@@ -356,5 +355,30 @@ def test_prepare_plan_legacy_standard_no_manifest_context(std_stacks):
     assert plan.manifest_context is None
     # legacy single PR for all stacks
     assert len(plan.pr_plans) == 1
+    assert plan.pr_plans[0].wave_number is None
+
+
+def test_prepare_plan_explicit_standard_override_stack_not_managed(std_stacks):
+    # ST-4126 (Copilot review): an explicit DEPLOY_STRATEGY=standard with an OVERRIDE-STACK
+    # deploy must NOT be promoter-managed — no manifest_context and no idempotency guard,
+    # just the override single-PR. The manifest/guard wiring must be gated on plan.strategy
+    # the same way the grouping is (canary/override are orthogonal axes).
+    os.chdir(std_stacks["base_dir"])
+    env = {
+        "HELM_CHART": "test-chart",
+        "IMAGE_TAG": "production-abc123",
+        "GH_TOKEN": "t",
+        "GH_APPROVE_TOKEN": "a",
+        "DEPLOY_STRATEGY": "standard",
+        "OVERRIDE_STACK": "kbc-us-east-1",  # a real prod stack on disk → plan.strategy = OVERRIDE
+        "DRY_RUN": "true",
+        "TARGET_PATH": str(std_stacks["base_dir"]),
+    }
+    config = EnvironmentConfig.from_env(env)
+    plan = prepare_plan(config, _io_layer())
+
+    assert plan.strategy == UpdateStrategy.OVERRIDE
+    assert plan.manifest_context is None            # NOT promoter-managed → no manifest
+    assert len(plan.pr_plans) == 1                  # override single-PR, not 2-wave
     assert plan.pr_plans[0].wave_number is None
     assert plan.pr_plans[0].labels == []

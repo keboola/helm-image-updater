@@ -37,11 +37,16 @@ class DeployStrategy(Enum):
 
     @property
     def is_promoter_managed(self) -> bool:
-        """Strategies whose PRs the release-promoter owns (unmerged, labelled,
-        carrying a wave-0 manifest). Superset of `is_wave`: also includes STANDARD,
-        which ST-4126 emits as a promoter-managed 2-wave dev→prod release when run
-        unmerged. Used for the manifest-context / idempotency-guard wiring — NOT for
-        routing into `_group_changes_by_wave` (that keys off `is_wave`)."""
+        """Strategy-level CAPABILITY: strategies that *can* be promoter-managed (PRs
+        created unmerged, labelled, carrying a wave-0 manifest). Superset of `is_wave`:
+        also includes STANDARD, which ST-4126 can emit as a 2-wave dev→prod release.
+
+        NOTE: this is about the STRATEGY, not a given run. Whether a specific run is
+        actually promoter-managed depends on more than the strategy — for STANDARD it
+        also needs `EnvironmentConfig.promoter_managed_standard` (an explicit
+        DEPLOY_STRATEGY=standard) AND a PRODUCTION/DEV deploy. Do NOT use this predicate
+        as the run-time gate: it is True for STANDARD even for a legacy default single-PR
+        deploy. The run-time condition lives in `plan_builder._is_promoter_managed_standard`."""
         return self.is_wave or self is DeployStrategy.STANDARD
 
 
