@@ -382,3 +382,41 @@ def test_prepare_plan_explicit_standard_override_stack_not_managed(std_stacks):
     assert len(plan.pr_plans) == 1                  # override single-PR, not 2-wave
     assert plan.pr_plans[0].wave_number is None
     assert plan.pr_plans[0].labels == []
+
+
+def test_prepare_plan_explicit_standard_dev_tag_not_managed(std_stacks):
+    # F2 (Halama review): a dev-* tag is NOT a production release. Even with an explicit
+    # DEPLOY_STRATEGY=standard it must NOT enter the promoter-managed 2-wave path — that
+    # would make the dev deploy an unmerged wave PR + manifest + arm the idempotency guard,
+    # stranding the dev update (the promoter only merges release:wave:0 anchors). The gate
+    # is PRODUCTION-only; dev tags keep their legacy fast (auto-merged) behavior.
+    os.chdir(std_stacks["base_dir"])
+    env = {
+        "HELM_CHART": "test-chart",
+        "IMAGE_TAG": "dev-abc123",
+        "GH_TOKEN": "t",
+        "GH_APPROVE_TOKEN": "a",
+        "DEPLOY_STRATEGY": "standard",
+        "DRY_RUN": "true",
+        "TARGET_PATH": str(std_stacks["base_dir"]),
+    }
+    config = EnvironmentConfig.from_env(env)
+    plan = prepare_plan(config, _io_layer())
+
+    assert plan.strategy == UpdateStrategy.DEV
+    assert plan.manifest_context is None             # NOT promoter-managed
+    assert all(p.wave_number is None for p in plan.pr_plans)  # no wave PRs (legacy dev grouping)
+
+
+def test_standard_2wave_prod_wave_uses_positive_is_production():
+    # F1 (Halama review): the prod wave is the POSITIVE is_production set, NOT "not is_dev".
+    # A canary stack (is_dev=False AND is_production=False) must be DROPPED, never mis-binned
+    # into the prod wave by negation.
+    changes = [_stack_change(s) for s in DEV_STACKS + PROD_STACKS]
+    changes.append(_stack_change("dev-keboola-canary-orion"))  # canary: not dev, not prod
+    groups = _group_changes_standard_2wave(changes, _std_plan(), _std_config(), Mock())
+    by_wave = {g["wave_number"]: g for g in groups}
+
+    assert "dev-keboola-canary-orion" not in by_wave[0]["stacks"]
+    assert "dev-keboola-canary-orion" not in by_wave[1]["stacks"]
+    assert sorted(by_wave[1]["stacks"]) == sorted(PROD_STACKS)  # only the real prod stacks

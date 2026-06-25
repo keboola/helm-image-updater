@@ -32,13 +32,14 @@ from .cloud_detection import get_stack_cloud_provider
 def _is_promoter_managed_standard(config: EnvironmentConfig, plan: UpdatePlan) -> bool:
     """True iff this run is a promoter-managed `standard` 2-wave release (ST-4126):
     an explicit DEPLOY_STRATEGY=standard (`config.promoter_managed_standard`, AUTOMERGE
-    ignored) AND a full PRODUCTION/DEV deploy. CANARY and OVERRIDE are orthogonal
-    UpdateStrategy axes (driven by the tag / override_stack) and are NEVER promoter-managed.
-    Keeping this gate in ONE place stops the grouping and the manifest/idempotency-guard
-    wiring from diverging (Copilot review)."""
-    return getattr(config, "promoter_managed_standard", False) and plan.strategy in (
-        UpdateStrategy.PRODUCTION,
-        UpdateStrategy.DEV,
+    ignored) AND a `PRODUCTION` deploy. ONLY production is staged — a `dev-*` tag (DEV),
+    CANARY, and OVERRIDE are orthogonal UpdateStrategy axes that keep their own handling
+    and are NEVER promoter-managed (a dev push must stay a fast auto-merged deploy, not an
+    unmerged wave PR the promoter has to merge — Halama review). Keeping this gate in ONE
+    place stops the grouping and the manifest/idempotency-guard wiring from diverging."""
+    return (
+        getattr(config, "promoter_managed_standard", False)
+        and plan.strategy == UpdateStrategy.PRODUCTION
     )
 
 
@@ -594,8 +595,12 @@ def _group_changes_standard_2wave(stack_changes, plan, config, io_layer):
     # Never roll an e2e stack into a wave (defensive — known e2e are also in EXCLUDED_STACKS).
     stack_changes = [sc for sc in stack_changes if not sc['stack'].endswith('-e2e')]
 
+    # Wave 0 = dev stacks; wave 1 = the POSITIVE `is_production` set (NOT `not is_dev`).
+    # Using the positive predicate is defense-in-depth (Halama review): a canary/excluded/
+    # ignored stack that somehow reaches here is dropped, never mis-binned into the prod
+    # wave — so it can't bypass the dev gate the feature exists to enforce.
     dev_changes = [sc for sc in stack_changes if classify_stack(sc['stack']).is_dev]
-    prod_changes = [sc for sc in stack_changes if not classify_stack(sc['stack']).is_dev]
+    prod_changes = [sc for sc in stack_changes if classify_stack(sc['stack']).is_production]
 
     # Build (tier-changes) in dev→prod order, dropping empty tiers, then number the
     # surviving tiers contiguously from 0. With both tiers present: dev=0, prod=1.
