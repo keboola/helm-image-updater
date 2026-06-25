@@ -22,13 +22,15 @@ class DeployStrategy(Enum):
     GRADUAL = "gradual"
     CRITICAL = "critical"
     CRITICAL_MANUAL_GATE = "critical-manual-gate"
+    MANUAL_PER_STACK = "manual-per-stack"
 
     @property
     def is_wave(self) -> bool:
         """Strategies routed through the strict waves-0..3 grouping
         (`_group_changes_by_wave`). MUST exclude STANDARD — its 2-wave dev→prod
         grouping is contiguous-from-0 by construction and must not hit the
-        0..3-required guard."""
+        0..3-required guard. MUST also exclude MANUAL_PER_STACK (ST-4157) — it has
+        NO waves (one PR per stack, flat member set)."""
         return self in (
             DeployStrategy.GRADUAL,
             DeployStrategy.CRITICAL,
@@ -38,8 +40,9 @@ class DeployStrategy(Enum):
     @property
     def is_promoter_managed(self) -> bool:
         """Strategy-level CAPABILITY: strategies that *can* be promoter-managed (PRs
-        created unmerged, labelled, carrying a wave-0 manifest). Superset of `is_wave`:
-        also includes STANDARD, which ST-4126 can emit as a 2-wave dev→prod release.
+        created unmerged, labelled, carrying a manifest). Superset of `is_wave`: also
+        includes STANDARD (ST-4126, 2-wave dev→prod) and MANUAL_PER_STACK (ST-4157,
+        one PR per stack).
 
         NOTE: this is about the STRATEGY, not a given run. Whether a specific run is
         actually promoter-managed depends on more than the strategy — for STANDARD it
@@ -47,7 +50,7 @@ class DeployStrategy(Enum):
         DEPLOY_STRATEGY=standard) AND a PRODUCTION/DEV deploy. Do NOT use this predicate
         as the run-time gate: it is True for STANDARD even for a legacy default single-PR
         deploy. The run-time condition lives in `plan_builder._is_promoter_managed_standard`."""
-        return self.is_wave or self is DeployStrategy.STANDARD
+        return self.is_wave or self in (DeployStrategy.STANDARD, DeployStrategy.MANUAL_PER_STACK)
 
 
 @dataclass
@@ -80,6 +83,9 @@ class PRPlan:
     commit_message: str
     labels: List[str] = field(default_factory=list)
     wave_number: Optional[int] = None  # set only for pr_type == 'wave'
+    # manual-per-stack (ST-4157): True for a member PR (pr_type == 'manual'). The executor
+    # collects these, anchors the lowest-numbered one (adds release:anchor + the manifest).
+    manual_member: bool = False
 
 
 @dataclass

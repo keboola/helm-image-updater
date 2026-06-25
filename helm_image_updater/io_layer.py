@@ -411,6 +411,16 @@ class IOLayer:
         pr.edit(body=body)
         print(f"📝 Updated PR #{pr_number} body (release manifest injected)")
 
+    def add_label(self, pr_number: int, label: str) -> None:
+        """Add a single label to an existing PR (used to mark the manual-per-stack anchor
+        with `release:anchor` once the lowest member PR number is known — ST-4157)."""
+        if self.dry_run:
+            print(f"[DRY RUN] Would add label '{label}' to PR #{pr_number}")
+            return
+        self._ensure_labels_exist([label])
+        self.github_repo.get_pull(pr_number).add_to_labels(label)
+        print(f"🏷️  Added label '{label}' to PR #{pr_number}")
+
     def find_open_release_anchors(self) -> List[Tuple[int, str]]:
         """Return (number, body) for every OPEN wave-0 anchor PR (label release:wave:0).
         Used by the idempotency guard to detect an existing open release by instanceId."""
