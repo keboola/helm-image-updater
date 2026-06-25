@@ -1,5 +1,23 @@
 # tests/test_models.py  (add)
-from helm_image_updater.models import PRPlan, UpdatePlan, UpdateStrategy
+from helm_image_updater.models import PRPlan, UpdatePlan, UpdateStrategy, DeployStrategy
+
+
+def test_is_promoter_managed_includes_wave_strategies_and_standard():
+    # Wave strategies are promoter-managed.
+    assert DeployStrategy.GRADUAL.is_promoter_managed is True
+    assert DeployStrategy.CRITICAL.is_promoter_managed is True
+    assert DeployStrategy.CRITICAL_MANUAL_GATE.is_promoter_managed is True
+    # STANDARD is promoter-managed too (ST-4126: 2-wave dev→prod when unmerged).
+    assert DeployStrategy.STANDARD.is_promoter_managed is True
+    # cloud_multi_stage stays legacy, NOT promoter-managed.
+    assert DeployStrategy.CLOUD_MULTI_STAGE.is_promoter_managed is False
+
+
+def test_standard_is_not_is_wave():
+    # STANDARD must NOT be routed through _group_changes_by_wave (which hard-requires
+    # waves 0..3); only is_promoter_managed includes it.
+    assert DeployStrategy.STANDARD.is_wave is False
+    assert DeployStrategy.GRADUAL.is_wave is True
 
 
 def test_prplan_wave_number_defaults_none_and_is_settable():

@@ -271,15 +271,22 @@ If `argocdApplication` only contained `appManifestsRevision`, the entire block i
 
 | `DEPLOY_STRATEGY` | grouping | `AUTOMERGE=true` | `AUTOMERGE=false` |
 |---|---|---|---|
-| `standard` (default) | one PR (per-stack for a production tag) | merge the PR(s) | leave unmerged (per-stack) |
+| _unset_ (legacy default) | one PR (per-stack for a production tag) | merge the PR(s) | leave unmerged (per-stack) |
+| `standard` (explicit) | promoter-managed **2-wave dev→prod**: wave 0 = all dev stacks (anchor, carries the manifest), wave 1 = all prod stacks | *(ignored)* — **2 unmerged wave PRs**, release-promoter merges dev → prod | **2 unmerged wave PRs** — release-promoter merges dev → prod |
 | `cloud_multi_stage` | dev + prod PRs per cloud | merge dev, leave prod | leave all unmerged |
 | `gradual` · `critical` · `critical-manual-gate` | 4 unmerged **wave** PRs (waves 0–3) | *(ignored — release-promoter merges)* | *(release-promoter merges)* |
 
 ### New vs. old parameters
 
-- **`DEPLOY_STRATEGY` is the single knob.** Unset (= `standard`) keeps today's behavior — existing deploys are unaffected.
+- **`DEPLOY_STRATEGY` is the single knob.** Leaving it unset keeps today's behavior — existing deploys are unaffected. An **explicit** `DEPLOY_STRATEGY=standard` opts the app into the promoter-managed 2-wave dev→prod release (see below); the unset default does **not**, so this is a deliberate, app-by-app opt-in.
 - **`MULTI_STAGE=true` is a deprecated alias for `DEPLOY_STRATEGY=cloud_multi_stage`** — identical behavior, kept for backward compatibility. If both are set, the explicit `DEPLOY_STRATEGY` wins.
-- **`AUTOMERGE`** still controls merging for `standard` and `cloud_multi_stage`. For the wave strategies (`gradual` / `critical` / `critical-manual-gate`) it is **ignored** — those PRs are always created unmerged and merged later by release-promoter.
+- **`AUTOMERGE`** still controls merging for the legacy default and `cloud_multi_stage`. For an **explicit `standard`** and the wave strategies (`gradual` / `critical` / `critical-manual-gate`) it is **ignored** — those PRs are always created unmerged (and auto-approved) and merged later by release-promoter.
+
+### Promoter-managed `standard` (2-wave dev→prod)
+
+An **explicit** `DEPLOY_STRATEGY=standard` on a **`production-` tag** emits the app as a promoter-managed **2-wave** release (`AUTOMERGE` is ignored, like the wave strategies): **wave 0 = all dev stacks** (the anchor — it carries the JSON release manifest), **wave 1 = all prod stacks** (the positive `is_production` set, so canary/excluded stacks are never mis-binned into prod). The cloud dimension is collapsed (no per-cloud split). Both PRs are created unmerged and labelled `release:wave:{0,1}` + `deploy:standard`. [release-promoter](https://github.com/keboola/release-promoter) merges the dev wave, waits for its ArgoCD **sync** (no UAT, no soak), then merges the prod wave. An app present in only one tier (no dev stacks → 1-wave prod) degenerates to a **single-wave** release (wave 0 only), which the promoter handles count-agnostically. Identity is `instanceId = <app>-<sha12>` (no cloud suffix); a duplicate fan-out for the same `instanceId` is refused while an anchor is still open.
+
+Only **`PRODUCTION`** deploys are staged: a `dev-*` tag (DEV), a `canary-*` tag, and an `override-stack` deploy are **not** promoter-managed even with explicit `DEPLOY_STRATEGY=standard` — they keep their existing handling (a dev push stays a fast, auto-merged deploy; canary auto-merges to its own branch; override is a single PR). This keeps routine dev deploys from being turned into unmerged wave PRs the promoter must merge.
 
 ### Wave strategies (release-promoter)
 

@@ -50,6 +50,76 @@ def test_executor_patches_wave0_anchor_with_manifest():
     assert "- wave 3: #13" in new_body
 
 
+def _standard_2wave_plan():
+    """A promoter-managed standard release: wave 0 = dev anchor, wave 1 = prod."""
+    plan = UpdatePlan(strategy=UpdateStrategy.PRODUCTION, helm_chart="connection",
+                      image_tag="production-abc")
+    plan.manifest_context = {"app": "connection", "instance_id": "connection-deadbeef0123",
+                             "display_name": "connection@production-abc",
+                             "source_sha": "deadbeef0123", "source_pr": None}
+    for w in range(2):
+        fc = FileChange(file_path=f"stack{w}/connection/tag.yaml", old_content="a",
+                        new_content="b", change_description="d")
+        plan.file_changes.append(fc)
+        plan.pr_plans.append(PRPlan(branch_name=f"connection-wave{w}-production-abc-xxxx",
+                                    pr_title=f"w{w}", pr_body=f"BODY{w}", base_branch="main",
+                                    auto_merge=False, files_to_commit=[fc.file_path],
+                                    commit_message="c",
+                                    labels=[f"release:wave:{w}", "deploy:standard"],
+                                    wave_number=w))
+    return plan
+
+
+def test_executor_standard_2wave_manifest_shape():
+    """ST-4126: a 2-wave standard release emits a v1 manifest with waves={'0':N,'1':M}
+    on the wave-0 (dev) anchor; deploy:standard labels; instanceId=<app>-<sha12>."""
+    plan = _standard_2wave_plan()
+    io = MagicMock()
+    io.create_branch_commit_and_pr.side_effect = [
+        "https://github.com/keboola/kbc-stacks/pull/20",  # wave 0 (dev anchor)
+        "https://github.com/keboola/kbc-stacks/pull/21",  # wave 1 (prod)
+    ]
+    result = execute_plan(plan, io)
+
+    io.update_pull_request_body.assert_called_once()
+    (anchor_num, new_body), _ = io.update_pull_request_body.call_args
+    assert anchor_num == 20  # dev anchor
+    manifest = json.loads(JSON_FENCE_RE.findall(new_body)[0])
+    assert manifest["manifestVersion"] == "v1"
+    assert manifest["instanceId"] == "connection-deadbeef0123"
+    assert manifest["app"] == "connection"
+    assert manifest["anchorWave"] == 0
+    assert manifest["waves"] == {"0": 20, "1": 21}
+    assert new_body.startswith("BODY0")
+
+
+def test_executor_standard_1wave_manifest_shape():
+    """1-wave fallback (no dev or no prod): a single wave-0 release emits waves={'0':N}."""
+    plan = UpdatePlan(strategy=UpdateStrategy.PRODUCTION, helm_chart="connection",
+                      image_tag="production-abc")
+    plan.manifest_context = {"app": "connection", "instance_id": "connection-cafef00d0001",
+                             "display_name": "connection@production-abc",
+                             "source_sha": "cafef00d0001", "source_pr": None}
+    fc = FileChange(file_path="prod/connection/tag.yaml", old_content="a", new_content="b",
+                    change_description="d")
+    plan.file_changes.append(fc)
+    plan.pr_plans.append(PRPlan(branch_name="connection-wave0-production-abc-xxxx",
+                                pr_title="w0", pr_body="BODY0", base_branch="main",
+                                auto_merge=False, files_to_commit=[fc.file_path],
+                                commit_message="c",
+                                labels=["release:wave:0", "deploy:standard"], wave_number=0))
+    io = MagicMock()
+    io.create_branch_commit_and_pr.return_value = "https://github.com/keboola/kbc-stacks/pull/30"
+    execute_plan(plan, io)
+
+    io.update_pull_request_body.assert_called_once()
+    (anchor_num, new_body), _ = io.update_pull_request_body.call_args
+    assert anchor_num == 30
+    manifest = json.loads(JSON_FENCE_RE.findall(new_body)[0])
+    assert manifest["waves"] == {"0": 30}
+    assert manifest["anchorWave"] == 0
+
+
 def test_executor_no_patch_when_not_wave_mode():
     plan = UpdatePlan(strategy=UpdateStrategy.PRODUCTION, helm_chart="connection", image_tag="t")
     fc = FileChange(file_path="s/connection/tag.yaml", old_content="a", new_content="b", change_description="d")
@@ -133,6 +203,28 @@ def test_executor_wave_creation_exception_caught_breaks_and_reports():
     assert any("wave 2" in e and "boom-502" in e for e in result.errors)
     # The F3 reporter still emits the collected-vs-missing picture.
     assert any("waves [2, 3]" in e and "[0, 1]" in e for e in result.errors)
+
+
+def test_executor_closes_orphan_wave_prs_when_manifest_withheld():
+    """A partial fan-out (a wave PR fails to create) withholds the manifest (F3) AND closes
+    the already-created lower-wave PRs, so no orphaned manifest-less release:wave:0 anchor is
+    left behind — HIU's rerun guard detects duplicates by parsing the instanceId from an
+    anchor body, which a manifest-less (withheld) anchor lacks, so an orphan would otherwise
+    let a duplicate fan-out through on the next run (Halama review of #37)."""
+    plan = _wave_plan()
+    io = MagicMock()
+    io.create_branch_commit_and_pr.side_effect = [
+        "https://github.com/keboola/kbc-stacks/pull/10",  # wave 0 (the anchor)
+        "https://github.com/keboola/kbc-stacks/pull/11",  # wave 1
+        Exception("boom-502"),                            # wave 2 creation raises
+    ]
+    result = execute_plan(plan, io)
+
+    assert result.success is False
+    io.update_pull_request_body.assert_not_called()        # manifest withheld (F3)
+    # the already-created lower-wave PRs are closed → no orphan anchor for the guard to miss
+    closed = {c.args[0] for c in io.close_pr.call_args_list}
+    assert closed == {10, 11}
 
 
 def test_executor_wave_auto_approve_failure_keeps_fanout_and_manifest():

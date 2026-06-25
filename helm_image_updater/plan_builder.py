@@ -29,6 +29,20 @@ from .config import CANARY_STACKS, IGNORED_FOLDERS, DEV_STACK_MAPPING, GITHUB_RE
 from .cloud_detection import get_stack_cloud_provider
 
 
+def _is_promoter_managed_standard(config: EnvironmentConfig, plan: UpdatePlan) -> bool:
+    """True iff this run is a promoter-managed `standard` 2-wave release (ST-4126):
+    an explicit DEPLOY_STRATEGY=standard (`config.promoter_managed_standard`, AUTOMERGE
+    ignored) AND a `PRODUCTION` deploy. ONLY production is staged — a `dev-*` tag (DEV),
+    CANARY, and OVERRIDE are orthogonal UpdateStrategy axes that keep their own handling
+    and are NEVER promoter-managed (a dev push must stay a fast auto-merged deploy, not an
+    unmerged wave PR the promoter has to merge — Halama review). Keeping this gate in ONE
+    place stops the grouping and the manifest/idempotency-guard wiring from diverging."""
+    return (
+        getattr(config, "promoter_managed_standard", False)
+        and plan.strategy == UpdateStrategy.PRODUCTION
+    )
+
+
 def prepare_plan(config: EnvironmentConfig, io_layer: IOLayer) -> UpdatePlan:
     """
     Prepare a complete execution plan.
@@ -91,8 +105,10 @@ def prepare_plan(config: EnvironmentConfig, io_layer: IOLayer) -> UpdatePlan:
     # Group changes into PRs
     pr_groups = _group_changes_for_prs(stack_changes, plan, config, io_layer)
 
-    # Wave mode: derive the manifest identity, then guard against a duplicate fan-out.
-    if config.deploy_strategy.is_wave and pr_groups:
+    # Promoter-managed modes (wave strategies + promoter-managed `standard`, ST-4126):
+    # derive the manifest identity, then guard against a duplicate fan-out.
+    promoter_managed = config.deploy_strategy.is_wave or _is_promoter_managed_standard(config, plan)
+    if promoter_managed and pr_groups:
         plan.manifest_context = _build_manifest_context(plan)
         if not config.dry_run:
             _guard_release_not_already_open(plan.manifest_context["instance_id"], io_layer)
@@ -420,6 +436,15 @@ def _group_changes_for_prs(
     if config.deploy_strategy.is_wave:
         return _group_changes_by_wave(stack_changes, plan, config, io_layer)
 
+    # Promoter-managed `standard`: 2-wave dev→prod release (ST-4126). See
+    # `_is_promoter_managed_standard` — an explicit DEPLOY_STRATEGY=standard for a full
+    # PRODUCTION/DEV deploy (AUTOMERGE ignored). CANARY and OVERRIDE are orthogonal
+    # UpdateStrategy axes and MUST keep their own handling below (the same predicate gates
+    # the manifest/guard wiring in prepare_plan, so the two can't diverge). The legacy
+    # default standard (empty strategy) falls through to the historical grouping below.
+    if _is_promoter_managed_standard(config, plan):
+        return _group_changes_standard_2wave(stack_changes, plan, config, io_layer)
+
     if plan.strategy == UpdateStrategy.CANARY:
         # Canary: always one PR
         return [{
@@ -544,6 +569,46 @@ def _group_changes_by_wave(stack_changes, plan, config, io_layer):
     groups = []
     for wave in sorted(by_wave):
         changes = by_wave[wave]
+        groups.append({
+            'stacks': [sc['stack'] for sc in changes],
+            'changes': changes,
+            'base_branch': 'main',
+            'pr_type': 'wave',
+            'wave_number': wave,
+            'labels': [wave_label(wave), deploy_lbl],
+        })
+    return groups
+
+
+def _group_changes_standard_2wave(stack_changes, plan, config, io_layer):
+    """Group a promoter-managed `standard` deploy into a 2-wave dev→prod release (ST-4126).
+
+    wave 0 = all dev stacks (the anchor, carries the manifest), wave 1 = all prod stacks.
+    The cloud dimension is collapsed entirely (no per-cloud split, no rollout_wave lookup).
+
+    1-wave fallback: an app present in only one tier (no dev stacks, or no prod stacks)
+    emits a single wave-0 PR (the promoter handles 1-wave releases count-agnostically).
+    Wave numbers are contiguous-from-0 by construction.
+    """
+    deploy_lbl = deploy_label(config.deploy_strategy)
+
+    # Never roll an e2e stack into a wave (defensive — known e2e are also in EXCLUDED_STACKS).
+    stack_changes = [sc for sc in stack_changes if not sc['stack'].endswith('-e2e')]
+
+    # Wave 0 = dev stacks; wave 1 = the POSITIVE `is_production` set (NOT `not is_dev`).
+    # Using the positive predicate is defense-in-depth (Halama review): a canary/excluded/
+    # ignored stack that somehow reaches here is dropped, never mis-binned into the prod
+    # wave — so it can't bypass the dev gate the feature exists to enforce.
+    dev_changes = [sc for sc in stack_changes if classify_stack(sc['stack']).is_dev]
+    prod_changes = [sc for sc in stack_changes if classify_stack(sc['stack']).is_production]
+
+    # Build (tier-changes) in dev→prod order, dropping empty tiers, then number the
+    # surviving tiers contiguously from 0. With both tiers present: dev=0, prod=1.
+    # With only one tier present: that tier becomes wave 0 (1-wave fallback).
+    tiers = [t for t in (dev_changes, prod_changes) if t]
+
+    groups = []
+    for wave, changes in enumerate(tiers):
         groups.append({
             'stacks': [sc['stack'] for sc in changes],
             'changes': changes,

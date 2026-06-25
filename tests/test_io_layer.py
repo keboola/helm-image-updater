@@ -408,6 +408,24 @@ def test_update_pull_request_body_noop_in_dry_run():
     gh.get_pull.assert_not_called()
 
 
+def test_close_pr_closes_and_deletes_head_branch():
+    gh = MagicMock()
+    pr = MagicMock(); pr.head.ref = "feat/wave-1"
+    gh.get_pull.return_value = pr
+    _io(gh).close_pr(11)
+    gh.get_pull.assert_called_once_with(11)
+    pr.edit.assert_called_once_with(state="closed")
+    gh.get_git_ref.assert_called_once_with("heads/feat/wave-1")
+    gh.get_git_ref.return_value.delete.assert_called_once_with()
+
+
+def test_close_pr_noop_in_dry_run():
+    gh = MagicMock()
+    _io(gh, dry_run=True).close_pr(11)
+    gh.get_pull.assert_not_called()
+    gh.get_git_ref.assert_not_called()
+
+
 def test_find_open_release_anchors_returns_number_and_body():
     gh = MagicMock()
     issue = MagicMock(); issue.number = 7; issue.pull_request = object()

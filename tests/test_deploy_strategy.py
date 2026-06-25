@@ -147,6 +147,35 @@ def test_resolve_wave_rejects_non_integer():
         resolve_wave("kbc-us-east-1", {"rollout_wave": True})
 
 
+def test_promoter_managed_standard_requires_explicit_standard_and_automerge_false():
+    # Explicit DEPLOY_STRATEGY=standard + automerge=false → promoter-managed 2-wave.
+    cfg = EnvironmentConfig.from_env(_base_env(DEPLOY_STRATEGY="standard", AUTOMERGE="false"))
+    assert cfg.promoter_managed_standard is True
+    assert cfg.deploy_strategy == DeployStrategy.STANDARD
+    assert cfg.multi_stage is False
+
+
+def test_promoter_managed_standard_ignores_automerge_for_explicit_standard():
+    # Explicit standard → promoter-managed 2-wave regardless of AUTOMERGE (ST-4126):
+    # AUTOMERGE is ignored, exactly like the wave strategies.
+    for automerge in ("true", "false"):
+        cfg = EnvironmentConfig.from_env(_base_env(DEPLOY_STRATEGY="standard", AUTOMERGE=automerge))
+        assert cfg.promoter_managed_standard is True, f"automerge={automerge}"
+
+
+def test_promoter_managed_standard_off_for_default_empty_strategy():
+    # Empty DEPLOY_STRATEGY (the action default) collapses to STANDARD but is NOT explicit;
+    # even with automerge=false it must stay the legacy per-stack path.
+    cfg = EnvironmentConfig.from_env(_base_env(DEPLOY_STRATEGY="", AUTOMERGE="false"))
+    assert cfg.deploy_strategy == DeployStrategy.STANDARD
+    assert cfg.promoter_managed_standard is False
+
+
+def test_promoter_managed_standard_off_for_wave_strategies():
+    cfg = EnvironmentConfig.from_env(_base_env(DEPLOY_STRATEGY="gradual", AUTOMERGE="false"))
+    assert cfg.promoter_managed_standard is False
+
+
 def test_empty_deploy_strategy_with_multi_stage_aliases_to_cloud_multi_stage():
     # The action passes deploy-strategy='' by default; empty must behave as unset
     # so MULTI_STAGE=true still aliases to cloud_multi_stage (legacy action callers).
