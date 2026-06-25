@@ -426,6 +426,9 @@ class IOLayer:
         """Close an open PR and delete its head branch (best-effort). Used to clean up the
         already-created lower-wave PRs after a partial fan-out, so no orphaned manifest-less
         release:wave:0 anchor is left behind for the idempotency guard to miss."""
+        if self.dry_run:
+            print(f"[DRY RUN] Would close PR #{number} and delete its head branch")
+            return
         pr = self.github_repo.get_pull(number)
         head_ref = pr.head.ref
         pr.edit(state="closed")
