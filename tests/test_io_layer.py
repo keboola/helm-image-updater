@@ -434,7 +434,11 @@ def test_find_open_release_anchors_returns_number_and_body():
     pr = MagicMock(); pr.body = "BODY"
     gh.get_pull.return_value = pr
     anchors = _io(gh).find_open_release_anchors()
-    gh.get_issues.assert_called_once_with(state="open", labels=["release:wave:0"])
+    # ST-4157: anchors are discovered by BOTH release:wave:0 and release:anchor (queried
+    # separately, deduped by PR number). The same issue returned by both queries appears once.
+    label_calls = [c.kwargs.get("labels") for c in gh.get_issues.call_args_list]
+    assert ["release:wave:0"] in label_calls
+    assert ["release:anchor"] in label_calls
     assert anchors == [(7, "BODY")]
 
 

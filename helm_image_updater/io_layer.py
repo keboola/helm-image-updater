@@ -422,14 +422,23 @@ class IOLayer:
         print(f"🏷️  Added label '{label}' to PR #{pr_number}")
 
     def find_open_release_anchors(self) -> List[Tuple[int, str]]:
-        """Return (number, body) for every OPEN wave-0 anchor PR (label release:wave:0).
-        Used by the idempotency guard to detect an existing open release by instanceId."""
+        """Return (number, body) for every OPEN release anchor PR. Used by the idempotency
+        guard to detect an existing open release by instanceId.
+
+        Two discovery labels (queried separately — `labels=[...]` is an AND filter): the
+        wave-0 anchor (`release:wave:0`) for wave-ordered/standard releases, and the
+        anchor-only `release:anchor` for manual-per-stack (ST-4157). Deduped by PR number."""
         anchors: List[Tuple[int, str]] = []
-        for issue in self.github_repo.get_issues(state="open", labels=["release:wave:0"]):
-            if issue.pull_request is None:
-                continue
-            pr = self.github_repo.get_pull(issue.number)
-            anchors.append((issue.number, pr.body or ""))
+        seen: set = set()
+        for label in ("release:wave:0", "release:anchor"):
+            for issue in self.github_repo.get_issues(state="open", labels=[label]):
+                if issue.pull_request is None:
+                    continue
+                if issue.number in seen:
+                    continue
+                seen.add(issue.number)
+                pr = self.github_repo.get_pull(issue.number)
+                anchors.append((issue.number, pr.body or ""))
         return anchors
 
     def close_pr(self, number: int) -> None:

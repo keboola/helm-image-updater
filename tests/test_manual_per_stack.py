@@ -298,6 +298,45 @@ def test_execute_plan_manual_anchors_lowest_pr_and_patches_member_manifest(manua
     assert result.success is True
 
 
+def test_find_open_release_anchors_searches_wave0_and_release_anchor(monkeypatch=None):
+    # H2: the idempotency guard must also see manual anchors (release:anchor), not just
+    # wave-0 anchors — else a re-run double-opens a manual release.
+    gh = Mock()
+    gh.get_issues = Mock(return_value=[])
+    io = IOLayer(Mock(), gh, dry_run=False, approve_github_repo=Mock())
+
+    io.find_open_release_anchors()
+
+    label_args = [c.kwargs.get("labels") for c in gh.get_issues.call_args_list]
+    assert ["release:wave:0"] in label_args
+    assert ["release:anchor"] in label_args
+
+
+def test_prepare_plan_manual_invokes_idempotency_guard(manual_stacks):
+    # H2: a non-dry-run with an already-open MANUAL anchor (same instanceId) must raise.
+    import base64
+    import json as _json
+    from helm_image_updater.manifest import build_manual_manifest, manifest_block, compute_instance_id
+
+    os.chdir(manual_stacks)
+    env = _manual_env(manual_stacks, dry_run="false")
+    env["METADATA"] = base64.b64encode(
+        _json.dumps({"source": {"sha": "deadbeef0123abc"}}).encode()
+    ).decode()
+    config = EnvironmentConfig.from_env(env)
+
+    iid = compute_instance_id("test-chart", "deadbeef0123abc", "production-abc123")
+    anchor_body = manifest_block(build_manual_manifest(
+        app="test-chart", instance_id=iid, display_name="test-chart@production-abc123",
+        members=[9, 12, 15],
+    ))
+    io = IOLayer(Mock(), Mock(), dry_run=False, approve_github_repo=Mock())
+    io.find_open_release_anchors = Mock(return_value=[(9, anchor_body)])
+
+    with pytest.raises(RuntimeError, match="already has an open anchor"):
+        prepare_plan(config, io)
+
+
 def test_execute_plan_manual_anchor_label_failure_closes_members(manual_stacks):
     # Codex finding: release:anchor is applied BEFORE the body patch, so if the label-add
     # fails the members exist with no anchor + no manifest (undiscoverable, rerun-duplicable).
