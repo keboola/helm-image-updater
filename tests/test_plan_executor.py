@@ -135,6 +135,28 @@ def test_executor_wave_creation_exception_caught_breaks_and_reports():
     assert any("waves [2, 3]" in e and "[0, 1]" in e for e in result.errors)
 
 
+def test_executor_closes_orphan_wave_prs_when_manifest_withheld():
+    """A partial fan-out (a wave PR fails to create) withholds the manifest (F3) AND closes
+    the already-created lower-wave PRs, so no orphaned manifest-less release:wave:0 anchor is
+    left behind — HIU's rerun guard detects duplicates by parsing the instanceId from an
+    anchor body, which a manifest-less (withheld) anchor lacks, so an orphan would otherwise
+    let a duplicate fan-out through on the next run (Halama review of #37)."""
+    plan = _wave_plan()
+    io = MagicMock()
+    io.create_branch_commit_and_pr.side_effect = [
+        "https://github.com/keboola/kbc-stacks/pull/10",  # wave 0 (the anchor)
+        "https://github.com/keboola/kbc-stacks/pull/11",  # wave 1
+        Exception("boom-502"),                            # wave 2 creation raises
+    ]
+    result = execute_plan(plan, io)
+
+    assert result.success is False
+    io.update_pull_request_body.assert_not_called()        # manifest withheld (F3)
+    # the already-created lower-wave PRs are closed → no orphan anchor for the guard to miss
+    closed = {c.args[0] for c in io.close_pr.call_args_list}
+    assert closed == {10, 11}
+
+
 def test_executor_wave_auto_approve_failure_keeps_fanout_and_manifest():
     """AutoApproveError means the PR EXISTS (creation succeeded, only the CODEOWNERS
     approval failed) — the executor must keep fanning out and still emit the manifest

@@ -183,6 +183,21 @@ def _patch_anchor_manifest(plan: UpdatePlan, io_layer: IOLayer, wave_pr_numbers:
             f"(collected {sorted(wave_pr_numbers)}) or wave-0 body unavailable; refusing to "
             f"emit a partial manifest that would orphan wave PRs (F3)."
         )
+        # The release is incomplete and its manifest is withheld — so the already-created
+        # wave PRs are dead. Close them (single point covering every partial-fan-out path)
+        # so no orphaned, MANIFEST-LESS release:wave:0 anchor is left behind: the rerun guard
+        # detects duplicates by parsing the instanceId from an anchor body, which such an
+        # anchor lacks, so an orphan would let a duplicate fan-out through next run. Wave PRs
+        # are unmerged (auto_merge=False), so closing them deploys nothing. (Halama review.)
+        for w in sorted(wave_pr_numbers):
+            num = wave_pr_numbers[w]
+            try:
+                io_layer.close_pr(num)
+                print(f"Closed orphaned wave {w} PR #{num} (incomplete release; manifest withheld).")
+            except Exception as exc:
+                result.errors.append(
+                    f"Could not close orphaned wave {w} PR #{num}: {exc}. Close it manually."
+                )
         return
     anchor = wave_pr_numbers[0]
     manifest = build_manifest(

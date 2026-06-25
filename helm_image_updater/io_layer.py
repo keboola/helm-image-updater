@@ -422,6 +422,18 @@ class IOLayer:
             anchors.append((issue.number, pr.body or ""))
         return anchors
 
+    def close_pr(self, number: int) -> None:
+        """Close an open PR and delete its head branch (best-effort). Used to clean up the
+        already-created lower-wave PRs after a partial fan-out, so no orphaned manifest-less
+        release:wave:0 anchor is left behind for the idempotency guard to miss."""
+        pr = self.github_repo.get_pull(number)
+        head_ref = pr.head.ref
+        pr.edit(state="closed")
+        try:
+            self.github_repo.get_git_ref(f"heads/{head_ref}").delete()
+        except Exception as exc:
+            print(f"  (head branch '{head_ref}' delete skipped: {exc})")
+
     def _ensure_labels_exist(self, names: List[str]) -> None:
         """Create-if-missing each label (tolerate already-exists)."""
         for name in names:
