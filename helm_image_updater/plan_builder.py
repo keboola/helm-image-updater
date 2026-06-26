@@ -24,6 +24,7 @@ from .message_generation import (
     generate_pr_title_prefix,
     format_pr_body_with_metadata,
     wave_release_search_link,
+    manual_release_search_link,
 )
 from .config import CANARY_STACKS, IGNORED_FOLDERS, DEV_STACK_MAPPING, GITHUB_REPO
 from .cloud_detection import get_stack_cloud_provider
@@ -784,6 +785,14 @@ def _create_pr_plan(pr_group: Dict[str, Any], plan: UpdatePlan, config: Environm
             GITHUB_REPO, plan.helm_chart, plan.image_tag, plan.extra_tags
         )
         pr_body += f"\n\n### Release\n[All wave PRs of this release]({search_link})"
+    elif pr_type == 'manual':
+        # manual-per-stack members have no wave label; link a search by app + strategy
+        # labels + the chart+tags phrase so every member PR (anchor incl.) carries a link
+        # to the whole release.
+        search_link = manual_release_search_link(
+            GITHUB_REPO, plan.helm_chart, plan.image_tag, plan.extra_tags
+        )
+        pr_body += f"\n\n### Release\n[All member PRs of this manual-per-stack release]({search_link})"
 
 
     # Determine auto-merge

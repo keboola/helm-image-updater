@@ -26,6 +26,7 @@ from helm_image_updater.plan_builder import (
     _should_auto_merge,
 )
 from helm_image_updater.plan_executor import execute_plan
+from helm_image_updater.message_generation import manual_release_search_link
 
 
 PROD_STACKS = [
@@ -256,6 +257,32 @@ def test_prepare_plan_manual_one_pr_per_stack_unmerged_labelled(manual_stacks):
         assert p.labels == ["deploy:manual-per-stack"]
         assert p.wave_number is None
         assert p.manual_member is True
+
+
+def test_manual_release_search_link_uses_app_and_strategy_labels_and_tag():
+    from urllib.parse import unquote
+    url = manual_release_search_link("keboola/kbc-stacks", "gooddata-cn-provisioning",
+                                     "production-c7b8448a924d", None)
+    assert url.startswith("https://github.com/keboola/kbc-stacks/pulls?q=")
+    q = unquote(url)
+    assert 'label:"app:gooddata-cn-provisioning"' in q
+    assert 'label:"deploy:manual-per-stack"' in q
+    assert "production-c7b8448a924d" in q
+
+
+def test_manual_member_pr_bodies_link_to_all_release_prs(manual_stacks):
+    # Every member PR (anchor incl.) must carry a "### Release" link that finds the whole
+    # manual-per-stack release (the wave PRs have one; manual members were missing it).
+    from helm_image_updater.config import GITHUB_REPO
+    os.chdir(manual_stacks)
+    config = EnvironmentConfig.from_env(_manual_env(manual_stacks))
+    plan = prepare_plan(config, IOLayer(Mock(), Mock(), dry_run=True, approve_github_repo=Mock()))
+    expected = manual_release_search_link(GITHUB_REPO, "test-chart", "production-abc123", [])
+    assert len(plan.pr_plans) == len(PROD_STACKS)
+    for p in plan.pr_plans:
+        assert "### Release" in p.pr_body
+        assert "manual-per-stack release" in p.pr_body
+        assert expected in p.pr_body
 
 
 def test_execute_plan_manual_anchors_lowest_pr_and_patches_member_manifest(manual_stacks):
