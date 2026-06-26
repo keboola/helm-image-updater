@@ -434,8 +434,33 @@ def test_find_open_release_anchors_returns_number_and_body():
     pr = MagicMock(); pr.body = "BODY"
     gh.get_pull.return_value = pr
     anchors = _io(gh).find_open_release_anchors()
-    gh.get_issues.assert_called_once_with(state="open", labels=["release:wave:0"])
+    # ST-4157: anchors are discovered by BOTH release:wave:0 and release:anchor (queried
+    # separately, deduped by PR number). The same issue returned by both queries appears once.
+    label_calls = [c.kwargs.get("labels") for c in gh.get_issues.call_args_list]
+    assert ["release:wave:0"] in label_calls
+    assert ["release:anchor"] in label_calls
     assert anchors == [(7, "BODY")]
+
+
+# ---------------------------------------------------------------------------
+# ST-4157: IOLayer.add_label (used to stamp release:anchor on the manual anchor)
+# ---------------------------------------------------------------------------
+
+def test_add_label_applies_to_correct_pr_and_ensures_label_exists():
+    gh = MagicMock()
+    pr = MagicMock()
+    gh.get_pull.return_value = pr
+    _io(gh).add_label(7, "release:anchor")
+    gh.get_label.assert_any_call("release:anchor")   # _ensure_labels_exist ran
+    gh.get_pull.assert_called_once_with(7)            # applied to the correct PR number
+    pr.add_to_labels.assert_called_once_with("release:anchor")
+
+
+def test_add_label_dry_run_is_a_noop():
+    gh = MagicMock()
+    _io(gh, dry_run=True).add_label(7, "release:anchor")
+    gh.get_pull.assert_not_called()
+    gh.get_label.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

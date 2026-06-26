@@ -27,6 +27,9 @@ class EnvironmentConfig:
     # legacy default (empty strategy → STANDARD) leaves this False so historical single-PR /
     # per-stack behaviour is unchanged.
     promoter_managed_standard: bool = False
+    # True for DEPLOY_STRATEGY=manual-per-stack (ST-4157): one PR per prod stack, no waves.
+    # Always promoter-managed when selected (never a legacy default), AUTOMERGE ignored.
+    promoter_managed_manual_per_stack: bool = False
     _deploy_strategy_error: Optional[str] = field(default=None, init=False, repr=False)
     target_path: str = "."
     commit_sha: bool = False
@@ -81,7 +84,8 @@ class EnvironmentConfig:
             except ValueError:
                 deploy_strategy_error = (
                     f"Invalid DEPLOY_STRATEGY: '{raw_strategy}'. "
-                    "Must be one of: standard, cloud_multi_stage, gradual, critical, critical-manual-gate"
+                    "Must be one of: standard, cloud_multi_stage, gradual, critical, "
+                    "critical-manual-gate, manual-per-stack"
                 )
             if multi_stage_raw and deploy_strategy != DeployStrategy.CLOUD_MULTI_STAGE:
                 print("WARNING: MULTI_STAGE=true is ignored because DEPLOY_STRATEGY is set explicitly")
@@ -105,6 +109,10 @@ class EnvironmentConfig:
             and deploy_strategy == DeployStrategy.STANDARD
         )
 
+        # manual-per-stack (ST-4157) is ALWAYS promoter-managed when selected (no legacy
+        # default — it is never the empty-string default), so a simple equality is enough.
+        promoter_managed_manual_per_stack = deploy_strategy == DeployStrategy.MANUAL_PER_STACK
+
         config = cls(
             helm_chart=env.get("HELM_CHART", ""),
             image_tag=env.get("IMAGE_TAG", "").strip(),
@@ -113,6 +121,7 @@ class EnvironmentConfig:
             dry_run=env.get("DRY_RUN", "false").lower() == "true",
             multi_stage=multi_stage,
             promoter_managed_standard=promoter_managed_standard,
+            promoter_managed_manual_per_stack=promoter_managed_manual_per_stack,
             target_path=env.get("TARGET_PATH", "."),
             commit_sha=env.get("COMMIT_PIPELINE_SHA", "false").lower() == "true",
             override_stack=env.get("OVERRIDE_STACK", "").strip(),
@@ -199,6 +208,22 @@ class EnvironmentConfig:
                 if tag_type not in (TagType.PRODUCTION, TagType.SEMVER):
                     errors.append(
                         f"DEPLOY_STRATEGY '{self.deploy_strategy.value}' requires a production/semver "
+                        f"IMAGE_TAG, got '{self.image_tag}'"
+                    )
+
+        # manual-per-stack (ST-4157): a production rollout (one PR per prod stack), so it
+        # requires a production/semver tag and is incompatible with OVERRIDE_STACK — same
+        # as the wave strategies (kept separate so the wave error strings stay unchanged).
+        if self.deploy_strategy == DeployStrategy.MANUAL_PER_STACK:
+            if self.override_stack:
+                errors.append("DEPLOY_STRATEGY manual-per-stack is incompatible with OVERRIDE_STACK")
+            elif not self.image_tag:
+                errors.append("DEPLOY_STRATEGY 'manual-per-stack' requires a production/semver IMAGE_TAG")
+            else:
+                tag_type = detect_tag_type(self.image_tag)
+                if tag_type not in (TagType.PRODUCTION, TagType.SEMVER):
+                    errors.append(
+                        f"DEPLOY_STRATEGY 'manual-per-stack' requires a production/semver "
                         f"IMAGE_TAG, got '{self.image_tag}'"
                     )
 

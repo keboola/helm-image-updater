@@ -79,11 +79,51 @@ def build_manifest(
     return manifest
 
 
+def build_manual_manifest(
+    *,
+    app: str,
+    instance_id: str,
+    display_name: str,
+    members,
+    source_sha: Optional[str] = None,
+    source_pr: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Build the manual-per-stack (ST-4157) v1 manifest: a flat member set, NO waves.
+    `members` are the member PR numbers (sorted for determinism; anchor = min)."""
+    manifest: Dict[str, Any] = {
+        "manifestVersion": "v1",
+        "mode": "manual-per-stack",
+        "instanceId": instance_id,
+        "displayName": display_name,
+        "app": app,
+        "members": sorted(members),
+    }
+    if source_sha:
+        manifest["sourceSha"] = source_sha
+    if source_pr:
+        manifest["sourcePr"] = source_pr
+    return manifest
+
+
 def manifest_block(manifest: Dict[str, Any]) -> str:
     """Render the markdown block (heading + ```json fence) to append to the wave-0
     PR body. The fence shape matches the promoter's extractManifest regex."""
     body = json.dumps(manifest, indent=2, ensure_ascii=False)
     return f"{MANIFEST_HEADING}\n\n```json\n{body}\n```"
+
+
+def _is_valid_members(v: Any) -> bool:
+    """members (manual-per-stack): non-empty list of distinct positive ints (PR numbers).
+    Mirrors the promoter's isValidMembers (manifest.ts)."""
+    if not isinstance(v, list) or not v:
+        return False
+    seen = set()
+    for m in v:
+        # bool is an int subclass — exclude it explicitly.
+        if not isinstance(m, int) or isinstance(m, bool) or m <= 0 or m in seen:
+            return False
+        seen.add(m)
+    return True
 
 
 def is_manifest_v1(x: Any) -> bool:
@@ -101,6 +141,22 @@ def is_manifest_v1(x: Any) -> bool:
     app = x.get("app")
     if not isinstance(app, str) or not app:
         return False
+    for opt in ("sourceSha", "sourcePr"):
+        if opt in x and not isinstance(x[opt], str):
+            return False
+    # mode discriminator (ST-4157): "manual-per-stack" ⇒ flat members set, NO waves.
+    # A manual manifest carrying wave fields is a contradictory shape → reject.
+    mode = x.get("mode")
+    if mode == "manual-per-stack":
+        if "waves" in x or "anchorWave" in x:
+            return False
+        return _is_valid_members(x.get("members"))
+    # Mirror the promoter's `hasOwnProperty('mode') && mode !== undefined` reject (manifest.ts):
+    # JSON has no `undefined`, so ANY present `mode` key (incl. null) that isn't
+    # "manual-per-stack" is rejected — only an ABSENT mode key is the wave variant.
+    if "mode" in x:
+        return False
+    # wave-ordered manifest (no mode).
     if x.get("anchorWave") != 0:
         return False
     waves = x.get("waves")
@@ -114,9 +170,6 @@ def is_manifest_v1(x: Any) -> bool:
         if not isinstance(val, int) or isinstance(val, bool) or val <= 0 or val in seen:
             return False
         seen.add(val)
-    for opt in ("sourceSha", "sourcePr"):
-        if opt in x and not isinstance(x[opt], str):
-            return False
     return True
 
 

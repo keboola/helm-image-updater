@@ -43,6 +43,17 @@ def _is_promoter_managed_standard(config: EnvironmentConfig, plan: UpdatePlan) -
     )
 
 
+def _is_promoter_managed_manual_per_stack(config: EnvironmentConfig, plan: UpdatePlan) -> bool:
+    """True iff this run is a promoter-managed `manual-per-stack` release (ST-4157): an
+    explicit DEPLOY_STRATEGY=manual-per-stack AND a `PRODUCTION` deploy. Like the standard
+    gate, ONLY production is managed — DEV/CANARY/OVERRIDE are orthogonal axes that keep
+    their own handling and are never promoter-managed. One PR per prod stack, no waves."""
+    return (
+        config.deploy_strategy == DeployStrategy.MANUAL_PER_STACK
+        and plan.strategy == UpdateStrategy.PRODUCTION
+    )
+
+
 def prepare_plan(config: EnvironmentConfig, io_layer: IOLayer) -> UpdatePlan:
     """
     Prepare a complete execution plan.
@@ -105,9 +116,14 @@ def prepare_plan(config: EnvironmentConfig, io_layer: IOLayer) -> UpdatePlan:
     # Group changes into PRs
     pr_groups = _group_changes_for_prs(stack_changes, plan, config, io_layer)
 
-    # Promoter-managed modes (wave strategies + promoter-managed `standard`, ST-4126):
-    # derive the manifest identity, then guard against a duplicate fan-out.
-    promoter_managed = config.deploy_strategy.is_wave or _is_promoter_managed_standard(config, plan)
+    # Promoter-managed modes (wave strategies + promoter-managed `standard` ST-4126 +
+    # `manual-per-stack` ST-4157): derive the manifest identity, then guard against a
+    # duplicate fan-out.
+    promoter_managed = (
+        config.deploy_strategy.is_wave
+        or _is_promoter_managed_standard(config, plan)
+        or _is_promoter_managed_manual_per_stack(config, plan)
+    )
     if promoter_managed and pr_groups:
         plan.manifest_context = _build_manifest_context(plan)
         if not config.dry_run:
@@ -445,6 +461,11 @@ def _group_changes_for_prs(
     if _is_promoter_managed_standard(config, plan):
         return _group_changes_standard_2wave(stack_changes, plan, config, io_layer)
 
+    # Promoter-managed `manual-per-stack` (ST-4157): one PR per prod stack, no waves.
+    # Same gating discipline as standard — PRODUCTION only; CANARY/OVERRIDE fall through.
+    if _is_promoter_managed_manual_per_stack(config, plan):
+        return _group_changes_manual_per_stack(stack_changes, plan, config)
+
     if plan.strategy == UpdateStrategy.CANARY:
         # Canary: always one PR
         return [{
@@ -620,6 +641,32 @@ def _group_changes_standard_2wave(stack_changes, plan, config, io_layer):
     return groups
 
 
+def _group_changes_manual_per_stack(stack_changes, plan, config):
+    """Group a promoter-managed `manual-per-stack` deploy into ONE PR per prod stack (ST-4157).
+
+    No waves: each member PR carries `deploy:manual-per-stack` (the anchor gets `release:anchor`
+    + the manifest at executor time, once PR numbers are known). Only PROD stacks are members —
+    dev goes via the fast non-production path (§3.3). e2e stacks are dropped defensively.
+    """
+    deploy_lbl = deploy_label(config.deploy_strategy)  # deploy:manual-per-stack
+
+    members = [
+        sc for sc in stack_changes
+        if classify_stack(sc['stack']).is_production and not sc['stack'].endswith('-e2e')
+    ]
+
+    return [
+        {
+            'stacks': [sc['stack']],
+            'changes': [sc],
+            'base_branch': 'main',
+            'pr_type': 'manual',
+            'labels': [deploy_lbl],
+        }
+        for sc in members
+    ]
+
+
 def _guard_release_not_already_open(instance_id: str, io_layer: IOLayer) -> None:
     """Fail loudly if an open release with this instanceId already exists (re-run safety).
 
@@ -658,6 +705,10 @@ def _create_pr_plan(pr_group: Dict[str, Any], plan: UpdatePlan, config: Environm
     elif pr_type == 'wave':
         wave = pr_group['wave_number']
         branch_name = f"{plan.helm_chart}-wave{wave}-{plan.image_tag}-{suffix}"
+    elif pr_type == 'manual':
+        # manual-per-stack: one PR per stack — name it after the stack.
+        stack = pr_group['stacks'][0]
+        branch_name = f"{plan.helm_chart}-manual-{stack}-{plan.image_tag}-{suffix}"
     else:
         # Standard: dummy-service-production-tag-abc1
         branch_name = f"{plan.helm_chart}-{plan.image_tag}-{suffix}"
@@ -680,6 +731,12 @@ def _create_pr_plan(pr_group: Dict[str, Any], plan: UpdatePlan, config: Environm
         # search link quotes — they must match or the search finds nothing (ST-4035).
         pr_title = (
             f"[{plan.helm_chart} {config.deploy_strategy.value} wave {wave}] "
+            f"{build_tag_string(plan.helm_chart, plan.image_tag, plan.extra_tags)}"
+        )
+    elif pr_type == 'manual':
+        stack = pr_group['stacks'][0]
+        pr_title = (
+            f"[{plan.helm_chart} manual-per-stack {stack}] "
             f"{build_tag_string(plan.helm_chart, plan.image_tag, plan.extra_tags)}"
         )
     else:
@@ -750,6 +807,7 @@ def _create_pr_plan(pr_group: Dict[str, Any], plan: UpdatePlan, config: Environm
         commit_message=commit_message,
         labels=pr_group.get('labels', []),
         wave_number=pr_group.get('wave_number'),
+        manual_member=(pr_type == 'manual'),
     )
 
 
@@ -773,6 +831,10 @@ def _should_auto_merge(plan: UpdatePlan, pr_type: str, user_requested: bool) -> 
     
     if pr_type == 'wave':
         print(f"       - result: FALSE (wave PRs are merged by release-promoter)")
+        return False
+
+    if pr_type == 'manual':
+        print(f"       - result: FALSE (manual-per-stack members are merged by a human)")
         return False
 
     if plan.strategy == UpdateStrategy.CANARY:

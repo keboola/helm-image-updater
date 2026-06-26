@@ -55,7 +55,7 @@ Optional:
 - `AUTOMERGE`: Whether to automatically merge PRs (default: "true", note: canary updates are always auto-merged). When set to `false`, PRs are auto-approved by the machine user instead, satisfying CODEOWNERS requirements so humans can merge without waiting for additional reviews.
 - `DRY_RUN`: Whether to perform a dry run (default: "false")
 - `MULTI_STAGE`: Enable multi-stage deployment (default: "false"). **Deprecated** — alias for `DEPLOY_STRATEGY=cloud_multi_stage`; prefer `DEPLOY_STRATEGY`.
-- `DEPLOY_STRATEGY`: Rollout strategy (default: "standard"): `standard`, `cloud_multi_stage`, `gradual`, `critical`, or `critical-manual-gate`. See [Deploy Strategies](#deploy-strategies).
+- `DEPLOY_STRATEGY`: Rollout strategy (default: "standard"): `standard`, `cloud_multi_stage`, `gradual`, `critical`, `critical-manual-gate`, or `manual-per-stack`. See [Deploy Strategies](#deploy-strategies).
 - `TARGET_PATH`: Path to the directory containing the stacks (default: ".")
 - `OVERRIDE_STACK`: Stack ID to explicitly target for the update, bypassing automatic stack selection (default: None)
 - `EXTRA_TAG1`, `EXTRA_TAG2`: Additional tags to update (format: "path:value")
@@ -90,7 +90,7 @@ Minimal usage example (always pin to a released version — see [Releasing](#rel
     automerge: "true"
     dry-run: "false"
     multi-stage: "false"
-    deploy-strategy: ""  # standard | cloud_multi_stage | gradual | critical | critical-manual-gate
+    deploy-strategy: ""  # standard | cloud_multi_stage | gradual | critical | critical-manual-gate | manual-per-stack
     override-stack: "dev-keboola-gcp-us-central1"
     extra-tag1: "agent.image.tag:dev-2.0.0"
     extra-tag2: "messenger.image.tag:dev-2.0.0"
@@ -130,7 +130,7 @@ on:
         type: boolean
         default: false
       deploy-strategy:
-        description: "Rollout strategy: standard | cloud_multi_stage | gradual | critical | critical-manual-gate"
+        description: "Rollout strategy: standard | cloud_multi_stage | gradual | critical | critical-manual-gate | manual-per-stack"
         required: false
         type: string
         default: ''
@@ -275,6 +275,7 @@ If `argocdApplication` only contained `appManifestsRevision`, the entire block i
 | `standard` (explicit) | promoter-managed **2-wave dev→prod**: wave 0 = all dev stacks (anchor, carries the manifest), wave 1 = all prod stacks | *(ignored)* — **2 unmerged wave PRs**, release-promoter merges dev → prod | **2 unmerged wave PRs** — release-promoter merges dev → prod |
 | `cloud_multi_stage` | dev + prod PRs per cloud | merge dev, leave prod | leave all unmerged |
 | `gradual` · `critical` · `critical-manual-gate` | 4 unmerged **wave** PRs (waves 0–3) | *(ignored — release-promoter merges)* | *(release-promoter merges)* |
+| `manual-per-stack` | promoter-managed **one PR per prod stack, no waves** | *(ignored)* — **N unmerged member PRs**, a human merges each in any order | **N unmerged member PRs** — a human merges each in any order |
 
 ### New vs. old parameters
 
@@ -291,6 +292,10 @@ Only **`PRODUCTION`** deploys are staged: a `dev-*` tag (DEV), a `canary-*` tag,
 ### Wave strategies (release-promoter)
 
 `gradual`, `critical`, and `critical-manual-gate` emit 4 unmerged PRs labeled `release:wave:<0-3>` and `deploy:<strategy>`. Release grouping/identity is carried by a JSON **release manifest** that helm-image-updater writes into the wave-0 anchor PR body (machine-read by release-promoter); the legacy `release:id` label is retired. [release-promoter](https://github.com/keboola/release-promoter) merges them wave-by-wave (0 → 3) as each wave syncs, passes UAT, and soaks; `critical-manual-gate` additionally waits for a human gate before the later waves. helm-image-updater itself never merges wave PRs (it still auto-approves them).
+
+### Manual-per-stack (one PR per stack)
+
+An **explicit** `DEPLOY_STRATEGY=manual-per-stack` on a **`production-`/semver tag** emits a deliberately **order-independent** release: **one unmerged PR per prod stack** (no waves), each labelled `deploy:manual-per-stack` and auto-approved. A human merges each member PR in **any order**; [release-promoter](https://github.com/keboola/release-promoter) completes the release once **all** members are merged + synced (no sequencing, soak, UAT, or out-of-order hole). The **anchor** = the **lowest-numbered member PR**: it carries the `release:anchor` discovery label and the JSON **release manifest** (`mode:"manual-per-stack"` + the flat `members` list). Dev stacks are excluded (they go via the fast non-production path); only `PRODUCTION` deploys are managed (`override-stack`/`canary`/`dev-*` keep their own handling). Identity is `instanceId = <app>-<sha12>`; a duplicate fan-out for the same `instanceId` is refused while an anchor is still open (the rerun guard scans both `release:wave:0` and `release:anchor` anchors).
 
 > **Prerequisite (wave strategies):** the deploy token needs `Issues: write` (PR labels go through the Issues API), and release-promoter's merge identity needs `Contents: write` + `Pull requests: write` and must be a bypass actor on the target branch's ruleset.
 
