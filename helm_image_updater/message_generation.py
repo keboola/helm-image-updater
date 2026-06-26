@@ -158,6 +158,36 @@ def wave_release_search_link(
     return f"https://github.com/{repo_full_name}/pulls?q={quote(phrase, safe='')}"
 
 
+def manual_release_search_link(
+    repo_full_name: str,
+    helm_chart: str,
+    image_tag: str,
+    extra_tags: Optional[List[Dict[str, str]]]
+) -> str:
+    """
+    Build a GitHub PR-search URL matching every member PR of a manual-per-stack release.
+
+    Pure function. Manual member PRs carry NO wave label, so we narrow by the app +
+    strategy labels (every member carries `app:<chart>` and `deploy:manual-per-stack`)
+    plus the quoted chart+tags phrase their titles embed — isolating exactly this
+    release's members (any state, across all stacks) without knowing PR numbers.
+
+    Args:
+        repo_full_name: GitHub repo as "owner/repo"
+        helm_chart: Name of the Helm chart
+        image_tag: The image tag
+        extra_tags: Optional list of extra tags
+
+    Returns:
+        Search URL string
+    """
+    phrase = (
+        f'is:pr label:"app:{helm_chart}" label:"deploy:manual-per-stack" '
+        f'"{build_tag_string(helm_chart, image_tag, extra_tags)}"'
+    )
+    return f"https://github.com/{repo_full_name}/pulls?q={quote(phrase, safe='')}"
+
+
 def generate_pr_title(
     pr_title_prefix: str,
     helm_chart: str,

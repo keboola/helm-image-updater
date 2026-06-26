@@ -24,6 +24,7 @@ from .message_generation import (
     generate_pr_title_prefix,
     format_pr_body_with_metadata,
     wave_release_search_link,
+    manual_release_search_link,
 )
 from .config import CANARY_STACKS, IGNORED_FOLDERS, DEV_STACK_MAPPING, GITHUB_REPO
 from .cloud_detection import get_stack_cloud_provider
@@ -642,18 +643,27 @@ def _group_changes_standard_2wave(stack_changes, plan, config, io_layer):
 
 
 def _group_changes_manual_per_stack(stack_changes, plan, config):
-    """Group a promoter-managed `manual-per-stack` deploy into ONE PR per prod stack (ST-4157).
+    """Group a promoter-managed `manual-per-stack` deploy into ONE PR per stack (ST-4157).
 
     No waves: each member PR carries `deploy:manual-per-stack` (the anchor gets `release:anchor`
-    + the manifest at executor time, once PR numbers are known). Only PROD stacks are members —
-    dev goes via the fast non-production path (§3.3). e2e stacks are dropped defensively.
+    + the manifest at executor time, once PR numbers are known). Members are EVERY stack the
+    production tag lands on -- BOTH dev and prod (a production tag deploys to dev stacks too;
+    only production stacks are tag-restricted). Uses the POSITIVE `is_dev or is_production`
+    predicate so canary / e2e / otherwise-unclassified stacks are dropped (mirrors the
+    standard 2-wave defensive filtering).
     """
     deploy_lbl = deploy_label(config.deploy_strategy)  # deploy:manual-per-stack
 
-    members = [
-        sc for sc in stack_changes
-        if classify_stack(sc['stack']).is_production and not sc['stack'].endswith('-e2e')
-    ]
+    def _is_member(stack):
+        # A member is a real deploy target — dev (DEV_STACK_MAPPING) or prod. classify_stack
+        # is the single source of truth: is_production already excludes EXCLUDED_STACKS (the
+        # e2e stacks), CANARY_STACKS and IGNORED_FOLDERS, and is_dev keys off DEV_STACK_MAPPING.
+        # So e2e/canary are dropped via the canonical config — no brittle name-suffix heuristic;
+        # a new e2e stack just needs to be in EXCLUDED_STACKS (Halama review). Classify once.
+        c = classify_stack(stack)
+        return c.is_dev or c.is_production
+
+    members = [sc for sc in stack_changes if _is_member(sc['stack'])]
 
     return [
         {
@@ -780,6 +790,14 @@ def _create_pr_plan(pr_group: Dict[str, Any], plan: UpdatePlan, config: Environm
             GITHUB_REPO, plan.helm_chart, plan.image_tag, plan.extra_tags
         )
         pr_body += f"\n\n### Release\n[All wave PRs of this release]({search_link})"
+    elif pr_type == 'manual':
+        # manual-per-stack members have no wave label; link a search by app + strategy
+        # labels + the chart+tags phrase so every member PR (anchor incl.) carries a link
+        # to the whole release.
+        search_link = manual_release_search_link(
+            GITHUB_REPO, plan.helm_chart, plan.image_tag, plan.extra_tags
+        )
+        pr_body += f"\n\n### Release\n[All member PRs of this manual-per-stack release]({search_link})"
 
 
     # Determine auto-merge

@@ -26,6 +26,7 @@ from helm_image_updater.plan_builder import (
     _should_auto_merge,
 )
 from helm_image_updater.plan_executor import execute_plan
+from helm_image_updater.message_generation import manual_release_search_link
 
 
 PROD_STACKS = [
@@ -70,10 +71,12 @@ def test_manual_per_stack_is_not_a_wave_strategy():
     assert DeployStrategy.MANUAL_PER_STACK.is_wave is False
 
 
-# --- grouping: one PR per prod stack, deploy label, no wave -------------------------
+# --- grouping: one PR per stack (dev + prod), deploy label, no wave -----------------
 
 
-def test_group_manual_one_pr_per_prod_stack():
+def test_group_manual_one_pr_per_stack_shape():
+    # Shape check on a prod-only input (dev inclusion is covered by the test below);
+    # one group per stack with the manual label, no wave/anchor labels.
     changes = [_stack_change(s) for s in PROD_STACKS]
     groups = _group_changes_manual_per_stack(changes, _manual_plan(), _manual_config())
 
@@ -89,21 +92,38 @@ def test_group_manual_one_pr_per_prod_stack():
     assert sorted(s for g in groups for s in g["stacks"]) == sorted(PROD_STACKS)
 
 
-def test_group_manual_excludes_dev_stacks():
-    # dev stacks go via the fast non-production path — never a manual member.
+def test_group_manual_includes_dev_and_prod_stacks():
+    # A production tag deploys to BOTH dev and prod stacks (only PROD stacks are
+    # tag-restricted), so manual-per-stack opens one PR per stack across both tiers.
     changes = [_stack_change(s) for s in PROD_STACKS + DEV_STACKS]
     groups = _group_changes_manual_per_stack(changes, _manual_plan(), _manual_config())
-    all_stacks = [s for g in groups for s in g["stacks"]]
-    for d in DEV_STACKS:
-        assert d not in all_stacks
-    assert sorted(all_stacks) == sorted(PROD_STACKS)
+    all_stacks = sorted(s for g in groups for s in g["stacks"])
+    assert all_stacks == sorted(PROD_STACKS + DEV_STACKS)
+    assert len(groups) == len(PROD_STACKS) + len(DEV_STACKS)
+    for g in groups:
+        assert len(g["stacks"]) == 1
+        assert g["labels"] == ["deploy:manual-per-stack"]
 
 
 def test_group_manual_excludes_e2e_stacks():
-    changes = [_stack_change(s) for s in PROD_STACKS]
-    changes.append(_stack_change("foo-bar-e2e"))
+    # e2e stacks are excluded via the canonical EXCLUDED_STACKS (classify_stack) — NOT a name
+    # suffix. A real EXCLUDED_STACKS entry is dropped; a new e2e stack must be listed there
+    # (Halama review — the brittle `endswith('-e2e')` heuristic was removed).
+    from helm_image_updater.config import EXCLUDED_STACKS
+    e2e = EXCLUDED_STACKS[0]
+    changes = [_stack_change(s) for s in PROD_STACKS] + [_stack_change(e2e)]
     groups = _group_changes_manual_per_stack(changes, _manual_plan(), _manual_config())
-    assert "foo-bar-e2e" not in [s for g in groups for s in g["stacks"]]
+    assert e2e not in [s for g in groups for s in g["stacks"]]
+    assert sorted(s for g in groups for s in g["stacks"]) == sorted(PROD_STACKS)
+
+
+def test_group_manual_drops_canary_and_unclassified_stacks():
+    # Positive predicate (is_dev or is_production): a canary stack — neither dev nor prod —
+    # is dropped, never mis-binned as a member (mirrors the standard 2-wave prod-wave guard).
+    changes = [_stack_change(s) for s in PROD_STACKS]
+    changes.append(_stack_change("dev-keboola-canary-orion"))  # canary: not dev, not prod
+    groups = _group_changes_manual_per_stack(changes, _manual_plan(), _manual_config())
+    assert "dev-keboola-canary-orion" not in [s for g in groups for s in g["stacks"]]
 
 
 # --- routing + auto-merge ----------------------------------------------------------
@@ -244,6 +264,32 @@ def test_prepare_plan_manual_one_pr_per_stack_unmerged_labelled(manual_stacks):
         assert p.labels == ["deploy:manual-per-stack"]
         assert p.wave_number is None
         assert p.manual_member is True
+
+
+def test_manual_release_search_link_uses_app_and_strategy_labels_and_tag():
+    from urllib.parse import unquote
+    url = manual_release_search_link("keboola/kbc-stacks", "gooddata-cn-provisioning",
+                                     "production-c7b8448a924d", None)
+    assert url.startswith("https://github.com/keboola/kbc-stacks/pulls?q=")
+    q = unquote(url)
+    assert 'label:"app:gooddata-cn-provisioning"' in q
+    assert 'label:"deploy:manual-per-stack"' in q
+    assert "production-c7b8448a924d" in q
+
+
+def test_manual_member_pr_bodies_link_to_all_release_prs(manual_stacks):
+    # Every member PR (anchor incl.) must carry a "### Release" link that finds the whole
+    # manual-per-stack release (the wave PRs have one; manual members were missing it).
+    from helm_image_updater.config import GITHUB_REPO
+    os.chdir(manual_stacks)
+    config = EnvironmentConfig.from_env(_manual_env(manual_stacks))
+    plan = prepare_plan(config, IOLayer(Mock(), Mock(), dry_run=True, approve_github_repo=Mock()))
+    expected = manual_release_search_link(GITHUB_REPO, "test-chart", "production-abc123", [])
+    assert len(plan.pr_plans) == len(PROD_STACKS)
+    for p in plan.pr_plans:
+        assert "### Release" in p.pr_body
+        assert "manual-per-stack release" in p.pr_body
+        assert expected in p.pr_body
 
 
 def test_execute_plan_manual_anchors_lowest_pr_and_patches_member_manifest(manual_stacks):
