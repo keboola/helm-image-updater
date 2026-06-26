@@ -655,10 +655,13 @@ def _group_changes_manual_per_stack(stack_changes, plan, config):
     deploy_lbl = deploy_label(config.deploy_strategy)  # deploy:manual-per-stack
 
     def _is_member(stack):
-        # Classify ONCE per stack (Copilot review): a member is a real deploy target
-        # (dev or prod), e2e excluded.
+        # A member is a real deploy target — dev (DEV_STACK_MAPPING) or prod. classify_stack
+        # is the single source of truth: is_production already excludes EXCLUDED_STACKS (the
+        # e2e stacks), CANARY_STACKS and IGNORED_FOLDERS, and is_dev keys off DEV_STACK_MAPPING.
+        # So e2e/canary are dropped via the canonical config — no brittle name-suffix heuristic;
+        # a new e2e stack just needs to be in EXCLUDED_STACKS (Halama review). Classify once.
         c = classify_stack(stack)
-        return (c.is_dev or c.is_production) and not stack.endswith('-e2e')
+        return c.is_dev or c.is_production
 
     members = [sc for sc in stack_changes if _is_member(sc['stack'])]
 

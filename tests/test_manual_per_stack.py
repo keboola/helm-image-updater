@@ -106,10 +106,15 @@ def test_group_manual_includes_dev_and_prod_stacks():
 
 
 def test_group_manual_excludes_e2e_stacks():
-    changes = [_stack_change(s) for s in PROD_STACKS]
-    changes.append(_stack_change("foo-bar-e2e"))
+    # e2e stacks are excluded via the canonical EXCLUDED_STACKS (classify_stack) — NOT a name
+    # suffix. A real EXCLUDED_STACKS entry is dropped; a new e2e stack must be listed there
+    # (Halama review — the brittle `endswith('-e2e')` heuristic was removed).
+    from helm_image_updater.config import EXCLUDED_STACKS
+    e2e = EXCLUDED_STACKS[0]
+    changes = [_stack_change(s) for s in PROD_STACKS] + [_stack_change(e2e)]
     groups = _group_changes_manual_per_stack(changes, _manual_plan(), _manual_config())
-    assert "foo-bar-e2e" not in [s for g in groups for s in g["stacks"]]
+    assert e2e not in [s for g in groups for s in g["stacks"]]
+    assert sorted(s for g in groups for s in g["stacks"]) == sorted(PROD_STACKS)
 
 
 def test_group_manual_drops_canary_and_unclassified_stacks():
