@@ -70,7 +70,7 @@ def test_manual_per_stack_is_not_a_wave_strategy():
     assert DeployStrategy.MANUAL_PER_STACK.is_wave is False
 
 
-# --- grouping: one PR per prod stack, deploy label, no wave -------------------------
+# --- grouping: one PR per stack (dev + prod), deploy label, no wave -----------------
 
 
 def test_group_manual_one_pr_per_prod_stack():
@@ -89,14 +89,17 @@ def test_group_manual_one_pr_per_prod_stack():
     assert sorted(s for g in groups for s in g["stacks"]) == sorted(PROD_STACKS)
 
 
-def test_group_manual_excludes_dev_stacks():
-    # dev stacks go via the fast non-production path — never a manual member.
+def test_group_manual_includes_dev_and_prod_stacks():
+    # A production tag deploys to BOTH dev and prod stacks (only PROD stacks are
+    # tag-restricted), so manual-per-stack opens one PR per stack across both tiers.
     changes = [_stack_change(s) for s in PROD_STACKS + DEV_STACKS]
     groups = _group_changes_manual_per_stack(changes, _manual_plan(), _manual_config())
-    all_stacks = [s for g in groups for s in g["stacks"]]
-    for d in DEV_STACKS:
-        assert d not in all_stacks
-    assert sorted(all_stacks) == sorted(PROD_STACKS)
+    all_stacks = sorted(s for g in groups for s in g["stacks"])
+    assert all_stacks == sorted(PROD_STACKS + DEV_STACKS)
+    assert len(groups) == len(PROD_STACKS) + len(DEV_STACKS)
+    for g in groups:
+        assert len(g["stacks"]) == 1
+        assert g["labels"] == ["deploy:manual-per-stack"]
 
 
 def test_group_manual_excludes_e2e_stacks():
@@ -104,6 +107,15 @@ def test_group_manual_excludes_e2e_stacks():
     changes.append(_stack_change("foo-bar-e2e"))
     groups = _group_changes_manual_per_stack(changes, _manual_plan(), _manual_config())
     assert "foo-bar-e2e" not in [s for g in groups for s in g["stacks"]]
+
+
+def test_group_manual_drops_canary_and_unclassified_stacks():
+    # Positive predicate (is_dev or is_production): a canary stack — neither dev nor prod —
+    # is dropped, never mis-binned as a member (mirrors the standard 2-wave prod-wave guard).
+    changes = [_stack_change(s) for s in PROD_STACKS]
+    changes.append(_stack_change("dev-keboola-canary-orion"))  # canary: not dev, not prod
+    groups = _group_changes_manual_per_stack(changes, _manual_plan(), _manual_config())
+    assert "dev-keboola-canary-orion" not in [s for g in groups for s in g["stacks"]]
 
 
 # --- routing + auto-merge ----------------------------------------------------------

@@ -38,7 +38,7 @@ else:
 
 setup(
     name="helm_image_updater",
-    version="0.18.0",
+    version="0.19.0",
     packages=find_packages(),
     install_requires=requirements,
     entry_points={

@@ -642,17 +642,21 @@ def _group_changes_standard_2wave(stack_changes, plan, config, io_layer):
 
 
 def _group_changes_manual_per_stack(stack_changes, plan, config):
-    """Group a promoter-managed `manual-per-stack` deploy into ONE PR per prod stack (ST-4157).
+    """Group a promoter-managed `manual-per-stack` deploy into ONE PR per stack (ST-4157).
 
     No waves: each member PR carries `deploy:manual-per-stack` (the anchor gets `release:anchor`
-    + the manifest at executor time, once PR numbers are known). Only PROD stacks are members —
-    dev goes via the fast non-production path (§3.3). e2e stacks are dropped defensively.
+    + the manifest at executor time, once PR numbers are known). Members are EVERY stack the
+    production tag lands on -- BOTH dev and prod (a production tag deploys to dev stacks too;
+    only production stacks are tag-restricted). Uses the POSITIVE `is_dev or is_production`
+    predicate so canary / e2e / otherwise-unclassified stacks are dropped (mirrors the
+    standard 2-wave defensive filtering).
     """
     deploy_lbl = deploy_label(config.deploy_strategy)  # deploy:manual-per-stack
 
     members = [
         sc for sc in stack_changes
-        if classify_stack(sc['stack']).is_production and not sc['stack'].endswith('-e2e')
+        if (classify_stack(sc['stack']).is_dev or classify_stack(sc['stack']).is_production)
+        and not sc['stack'].endswith('-e2e')
     ]
 
     return [
