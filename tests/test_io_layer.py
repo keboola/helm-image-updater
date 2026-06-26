@@ -443,6 +443,27 @@ def test_find_open_release_anchors_returns_number_and_body():
 
 
 # ---------------------------------------------------------------------------
+# ST-4157: IOLayer.add_label (used to stamp release:anchor on the manual anchor)
+# ---------------------------------------------------------------------------
+
+def test_add_label_applies_to_correct_pr_and_ensures_label_exists():
+    gh = MagicMock()
+    pr = MagicMock()
+    gh.get_pull.return_value = pr
+    _io(gh).add_label(7, "release:anchor")
+    gh.get_label.assert_any_call("release:anchor")   # _ensure_labels_exist ran
+    gh.get_pull.assert_called_once_with(7)            # applied to the correct PR number
+    pr.add_to_labels.assert_called_once_with("release:anchor")
+
+
+def test_add_label_dry_run_is_a_noop():
+    gh = MagicMock()
+    _io(gh, dry_run=True).add_label(7, "release:anchor")
+    gh.get_pull.assert_not_called()
+    gh.get_label.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
 # ST-4128: every PR HIU creates carries the `app:<service>` label
 # ---------------------------------------------------------------------------
 
