@@ -654,11 +654,13 @@ def _group_changes_manual_per_stack(stack_changes, plan, config):
     """
     deploy_lbl = deploy_label(config.deploy_strategy)  # deploy:manual-per-stack
 
-    members = [
-        sc for sc in stack_changes
-        if (classify_stack(sc['stack']).is_dev or classify_stack(sc['stack']).is_production)
-        and not sc['stack'].endswith('-e2e')
-    ]
+    def _is_member(stack):
+        # Classify ONCE per stack (Copilot review): a member is a real deploy target
+        # (dev or prod), e2e excluded.
+        c = classify_stack(stack)
+        return (c.is_dev or c.is_production) and not stack.endswith('-e2e')
+
+    members = [sc for sc in stack_changes if _is_member(sc['stack'])]
 
     return [
         {

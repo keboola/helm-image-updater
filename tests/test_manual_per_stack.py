@@ -74,7 +74,9 @@ def test_manual_per_stack_is_not_a_wave_strategy():
 # --- grouping: one PR per stack (dev + prod), deploy label, no wave -----------------
 
 
-def test_group_manual_one_pr_per_prod_stack():
+def test_group_manual_one_pr_per_stack_shape():
+    # Shape check on a prod-only input (dev inclusion is covered by the test below);
+    # one group per stack with the manual label, no wave/anchor labels.
     changes = [_stack_change(s) for s in PROD_STACKS]
     groups = _group_changes_manual_per_stack(changes, _manual_plan(), _manual_config())
 
