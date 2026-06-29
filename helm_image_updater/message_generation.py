@@ -254,9 +254,30 @@ def format_pr_body_with_metadata(
     workflow_url = source.get("workflow_url", "")
     sha = source.get("sha", "Unknown")
     pr_url = source.get("pr_url", "")
-    
-    # Build PR line for insertion only if it exists
-    pr_line = f"- **Pull Request:** [{pr_url}]({pr_url})\n" if pr_url else ""
+    # All source PRs in the deploy batch (e.g. a connection merge-queue batch, ST-4167).
+    # Booleans are excluded because bool is a subclass of int in Python.
+    pr_numbers = [
+        n for n in (source.get("pr_numbers") or [])
+        if isinstance(n, int) and not isinstance(n, bool)
+    ]
+
+    # Build the PR line. Prefer listing every source PR in the batch; fall back to the
+    # single pr_url for callers that don't forward a PR list (backward compatible).
+    if pr_numbers:
+        # Link to the source repo when we know its URL. Without it, render a non-linking
+        # code span (`#123`) rather than a bare `#123`, which GitHub would auto-link to a
+        # PR/issue in the kbc-stacks repo where this body is posted (the wrong repo).
+        repo_url_clean = (repo_url or "").rstrip("/")
+        links = ", ".join(
+            f"[#{n}]({repo_url_clean}/pull/{n})" if repo_url_clean else f"`#{n}`"
+            for n in pr_numbers
+        )
+        label = "Pull Requests" if len(pr_numbers) > 1 else "Pull Request"
+        pr_line = f"- **{label}:** {links}\n"
+    elif pr_url:
+        pr_line = f"- **Pull Request:** [{pr_url}]({pr_url})\n"
+    else:
+        pr_line = ""
     
     trigger_info = (
         "### 🔄 Pipeline Trigger\n"
