@@ -186,6 +186,27 @@ def _determine_strategy(config: EnvironmentConfig) -> UpdateStrategy:
     return UpdateStrategy.DEV  # Default
 
 
+def _effective_tag_type(plan: UpdatePlan) -> TagType:
+    """Most-cautious tag class across image_tag + extra tags (ST-4169).
+
+    PRODUCTION/SEMVER dominate CANARY/DEV, so a mixed deploy (e.g. a dev image tag
+    plus a production extra tag) is treated as production and is NOT auto-merged.
+    SEMVER collapses into PRODUCTION (a semver tag is a production release).
+    Returns INVALID when no usable tag is present (e.g. a `pr-test-*` override
+    build) -- which is non-production-class and so eligible to auto-merge onto a
+    non-prod stack.
+    """
+    values = [plan.image_tag] + [t.get("value", "") for t in (plan.extra_tags or [])]
+    types = [detect_tag_type(v) for v in values if v and v.strip()]
+    if any(t in (TagType.PRODUCTION, TagType.SEMVER) for t in types):
+        return TagType.PRODUCTION
+    if any(t == TagType.CANARY for t in types):
+        return TagType.CANARY
+    if any(t == TagType.DEV for t in types):
+        return TagType.DEV
+    return TagType.INVALID
+
+
 def _discover_stacks(io_layer: IOLayer) -> List[str]:
     """Discover all available stacks."""
     stacks = []
