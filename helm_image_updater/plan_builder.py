@@ -821,13 +821,12 @@ def _create_pr_plan(pr_group: Dict[str, Any], plan: UpdatePlan, config: Environm
         pr_body += f"\n\n### Release\n[All member PRs of this manual-per-stack release]({search_link})"
 
 
-    # Determine auto-merge
-    auto_merge = _should_auto_merge(plan, pr_group['pr_type'], config.automerge)
-    
+    # Determine auto-merge (ST-4169: by tag class + target stacks, not the automerge flag)
+    auto_merge = _should_auto_merge(plan, pr_group['pr_type'], pr_group['stacks'])
+
     print(f"🔀 Auto-merge decision for {pr_group['pr_type']}:")
     print(f"   - pr_type: {pr_group['pr_type']}")
-    print(f"   - user_requested: {config.automerge}")
-    print(f"   - strategy: {plan.strategy}")
+    print(f"   - stacks: {pr_group['stacks']}")
     print(f"   - decision: {'AUTO-MERGE' if auto_merge else 'MANUAL ONLY'}")
     
     # Get files to commit (tag.yaml + any override values.yaml changes)
@@ -861,28 +860,31 @@ def _get_canary_base_branch(config: EnvironmentConfig) -> str:
     return "main"
 
 
-def _should_auto_merge(plan: UpdatePlan, pr_type: str, user_requested: bool) -> bool:
-    """Determine if a PR should be auto-merged."""
-    print(f"    🧠 Auto-merge logic:")
-    print(f"       - strategy: {plan.strategy}")
-    print(f"       - pr_type: {pr_type}")
-    print(f"       - user_requested: {user_requested}")
-    
-    if pr_type == 'wave':
-        print(f"       - result: FALSE (wave PRs are merged by release-promoter)")
+def _should_auto_merge(plan: UpdatePlan, pr_type: str, stacks: List[str]) -> bool:
+    """Auto-merge a non-production deploy that targets only non-production stacks (ST-4169).
+
+    release-promoter owns wave + manual-per-stack PRs. A production-class image
+    (production-/semver, or a mixed deploy carrying one) is promoter-managed and never
+    auto-merged here. Everything else -- dev-/canary- tags AND unrecognized tags such as
+    the `pr-test-*` images used for `override-stack` test deploys -- auto-merges, provided
+    no stack in the PR is production.
+
+    The stack check is defense-in-depth: validate() rejects a dev/canary tag on a prod
+    stack, but if one ever slips through we still must not auto-merge it. `not is_production`
+    covers dev + e2e + canary and fails safe for a new/unknown stack name.
+    """
+    if pr_type in ('wave', 'manual'):
+        print(f"    🧠 Auto-merge: FALSE (pr_type={pr_type}; release-promoter / human merges)")
         return False
 
-    if pr_type == 'manual':
-        print(f"       - result: FALSE (manual-per-stack members are merged by a human)")
+    if _effective_tag_type(plan) == TagType.PRODUCTION:
+        print(f"    🧠 Auto-merge: FALSE (production-class image; promoter-managed)")
         return False
 
-    if plan.strategy == UpdateStrategy.CANARY:
-        print(f"       - result: TRUE (canary always auto-merges)")
-        return True  # Always auto-merge canary
+    prod_stacks = [s for s in stacks if classify_stack(s).is_production]
+    if prod_stacks:
+        print(f"    🧠 Auto-merge: FALSE (PR touches production stack(s): {prod_stacks})")
+        return False
 
-    if pr_type == 'multi_stage_prod':
-        print(f"       - result: FALSE (multi-stage prod never auto-merges)")
-        return False  # Never auto-merge multi-stage production
-    
-    print(f"       - result: {user_requested} (using user preference)")
-    return user_requested
+    print(f"    🧠 Auto-merge: TRUE (non-production deploy to non-production stacks: {stacks})")
+    return True

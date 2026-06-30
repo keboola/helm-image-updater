@@ -705,6 +705,7 @@ def test_nonexistent_stack_override(cli_test_env, capsys):
     assert len(created_prs) == 0
 
 
+@pytest.mark.skip(reason="ST-4169: cloud_multi_stage dev PRs no longer auto-merge (a production-class image is promoter-managed). The cloud_multi_stage strategy + this test are removed in ST-4159.")
 def test_multi_cloud_multi_stage_automerge_true(cli_test_env, capsys):
     """Test multi-cloud multi-stage deployment with automerge=true.
 
@@ -1102,9 +1103,10 @@ def test_happy_path_production_update(cli_test_env, mock_git_operations, capsys)
     assert mock_git_operations['commit'].called, "git commit should be called"
     assert mock_git_operations['create_pull_request'].called, "create PR should be called"
 
-    # Verify our tracking shows PR was created with automerge enabled
+    # ST-4169: a production-class image is promoter-managed, so HIU creates the PR but
+    # does NOT auto-merge it (it was auto-merged under the legacy automerge flag).
     assert len(created_prs) == 1
-    assert created_prs[0]["automerge"] is True
+    assert created_prs[0]["automerge"] is False
     assert "test-chart" in created_prs[0]["title"]
 
 
