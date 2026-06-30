@@ -78,8 +78,8 @@ from helm_image_updater.plan_builder import _should_auto_merge
 
 def test_wave_pr_type_never_auto_merges():
     plan = Mock(); plan.strategy = UpdateStrategy.PRODUCTION
-    assert _should_auto_merge(plan, "wave", user_requested=True) is False
-    assert _should_auto_merge(plan, "wave", user_requested=False) is False
+    # wave PRs are merged by release-promoter, never by HIU (pr_type short-circuit)
+    assert _should_auto_merge(plan, "wave", ["dev-keboola-gcp-us-central1"]) is False
 
 
 def test_wave_grouping_rejects_gap():
@@ -218,7 +218,7 @@ def test_create_pr_plan_wave_title_includes_extra_tags():
 
 def test_wave_never_auto_merges_even_for_canary_strategy():
     plan = Mock(); plan.strategy = UpdateStrategy.CANARY
-    assert _should_auto_merge(plan, "wave", user_requested=True) is False
+    assert _should_auto_merge(plan, "wave", ["dev-keboola-gcp-us-central1"]) is False
 
 
 from helm_image_updater.io_layer import IOLayer
