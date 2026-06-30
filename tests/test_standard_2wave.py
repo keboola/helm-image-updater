@@ -212,8 +212,11 @@ def test_canary_auto_merges_regardless_of_automerge_flag():
     # standard rollout (ST-4131) makes automerge=false the default.
     plan = Mock()
     plan.strategy = UpdateStrategy.CANARY
-    assert _should_auto_merge(plan, "canary", user_requested=False) is True
-    assert _should_auto_merge(plan, "canary", user_requested=True) is True
+    plan.image_tag = "canary-orion-abc"
+    plan.extra_tags = []
+    # canary tag (non-production-class) onto the canary stack (non-prod) -> auto-merges,
+    # no longer gated on any automerge flag (ST-4169).
+    assert _should_auto_merge(plan, "canary", ["dev-keboola-canary-orion"]) is True
 
 
 # --- prepare_plan: manifest-context + idempotency-guard wiring (integration) -------

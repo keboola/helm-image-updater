@@ -138,8 +138,8 @@ def test_group_changes_for_prs_routes_manual_per_stack():
 
 def test_should_auto_merge_manual_is_false():
     plan = _manual_plan()
-    assert _should_auto_merge(plan, "manual", user_requested=True) is False
-    assert _should_auto_merge(plan, "manual", user_requested=False) is False
+    # manual-per-stack members are merged by a human, never by HIU (pr_type short-circuit)
+    assert _should_auto_merge(plan, "manual", ["dev-keboola-gcp-us-central1"]) is False
 
 
 def test_is_promoter_managed_manual_per_stack_production_only():
