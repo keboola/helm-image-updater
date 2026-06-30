@@ -179,17 +179,19 @@ class EnvironmentConfig:
             if tag_type == TagType.INVALID:
                 errors.append(f"Invalid IMAGE_TAG format: '{self.image_tag}'. Must start with 'dev-', 'production-', 'canary-' or be a valid semver (e.g., 1.2.3)")
         
-        # Check for dev tag on production stack (even with override)
-        if self.override_stack and self.image_tag:
+        # A production override target accepts ONLY production/semver tags. Block any
+        # dev-/canary- tag -- the main image OR an extra tag -- from landing on a prod
+        # stack (ST-4169 closes the gap: previously only a dev MAIN tag was caught, so a
+        # canary tag or a dev extra tag slipped through). Non-production override targets
+        # (incl. e2e, which is EXCLUDED_STACKS) are unrestricted.
+        if self.override_stack:
             import os
             from .stack_classification import classify_stack
-            
-            # Only validate if the stack actually exists on disk
-            if os.path.isdir(self.override_stack):
-                tag_type = detect_tag_type(self.image_tag)
-                stack_classification = classify_stack(self.override_stack)
-                # Check if it's a dev tag being applied to a production stack
-                if tag_type == TagType.DEV and stack_classification.is_production:
+
+            # Only validate if the stack actually exists on disk.
+            if os.path.isdir(self.override_stack) and classify_stack(self.override_stack).is_production:
+                candidate_tags = [self.image_tag] + [t.get("value", "") for t in self.extra_tags]
+                if any(detect_tag_type(v) in (TagType.DEV, TagType.CANARY) for v in candidate_tags if v):
                     errors.append("Cannot apply non-production tag to production stack")
         
         if not self.approve_token:
