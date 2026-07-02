@@ -49,8 +49,15 @@ _REMOVE = _Sentinel()  # sentinel for "remove this key"
 # existing tests (unchanged)
 # ---------------------------------------------------------------------------
 
-def test_compute_instance_id_from_sha():
-    assert compute_instance_id("connection", "abcdef0123456789", "t") == "connection-abcdef012345"
+def test_compute_instance_id_from_image_tag():
+    # ST-4190: id is '<app>-<image_tag>' — UNIQUE PER FAN-OUT. The source sha is IGNORED
+    # (two builds of the same commit must NOT share an instanceId, or the promoter's
+    # duplicate-instanceId guard deadlocks both while they are concurrently in-flight).
+    assert compute_instance_id("connection", "abcdef0123456789", "production-abc-4448") == "connection-production-abc-4448"
+    # Idempotent per exact (app, image_tag) — independent of the sha argument.
+    assert compute_instance_id("connection", "deadbeef", "production-abc-4448") == compute_instance_id("connection", None, "production-abc-4448")
+    # Two builds of the SAME commit (different tags) → DIFFERENT ids (the deadlock fix).
+    assert compute_instance_id("connection", "abcdef", "production-abc-4447") != compute_instance_id("connection", "abcdef", "production-abc-4448")
 
 
 def test_compute_instance_id_is_machine_safe_even_for_unsafe_app():
@@ -116,12 +123,13 @@ def test_extract_instance_id_returns_none_on_bad_body(body):
 
 
 # ---------------------------------------------------------------------------
-# Finding 2: compute_instance_id must sanitize the sha-derived suffix too
+# compute_instance_id must sanitize the image_tag it now embeds (ST-4190)
 # ---------------------------------------------------------------------------
 
-def test_compute_instance_id_unsafe_sha_is_sanitized():
-    """sha from external pipeline metadata can contain unsafe chars; must be sanitized."""
-    iid = compute_instance_id("connection", "abc def:gh@i", "t")
+def test_compute_instance_id_unsafe_image_tag_is_sanitized():
+    """image_tag now feeds the id (ST-4190); any unsafe chars must be sanitized so the
+    manifest can never carry an instanceId the promoter would reject."""
+    iid = compute_instance_id("connection", "deadbeef", "prod tag:weird@1")
     # Must be a valid instanceId charset — no whitespace, ':', or '@'.
     assert INSTANCE_ID_RE.fullmatch(iid), f"unsafe id: {iid!r}"
     # Must still be prefixed with the safe app name.
