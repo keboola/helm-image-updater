@@ -10,7 +10,6 @@ isManifestV1) — keep in sync if the promoter contract changes.
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import re
 from typing import Any, Dict, Optional
@@ -38,20 +37,20 @@ def _machine_safe(app: str) -> str:
 
 
 def compute_instance_id(app: str, source_sha: Optional[str], image_tag: str) -> str:
-    """Machine-safe, DETERMINISTIC id. '<app>-<sha[:12]>' when a real source SHA is
-    available; otherwise '<app>-<sha256(app\\0image_tag)[:12]>' — NOT a random UUID — so a
-    re-run of the same (app, image_tag) yields the SAME id and HIU's idempotency guard still
-    detects a duplicate fan-out when pipeline metadata is absent (the test harness passes no
-    METADATA, F6). With a real SHA the id identifies the source commit (two fan-outs of
-    different image tags built from the same commit share one instanceId — intended). On the
-    hash-fallback path: a different tag → a different id; the promoter's duplicate-instanceId
-    guard is the backstop for a genuine same-tag collision."""
-    safe = _machine_safe(app)
-    sha = (source_sha or "").strip()
-    if sha and sha.lower() != "unknown":
-        return f"{safe}-{_machine_safe(sha[:12])}"
-    digest = hashlib.sha256(f"{app}\0{image_tag}".encode()).hexdigest()[:12]
-    return f"{safe}-{digest}"
+    """Machine-safe, DETERMINISTIC release identity: ``<app>-<image_tag>``.
+
+    One image tag == one release. The id is UNIQUE PER FAN-OUT (release-promoter DESIGN
+    §2 requires this) yet idempotent per exact (app, image_tag): a re-run of the same
+    deploy yields the SAME id, so HIU's duplicate-fan-out guard still detects it.
+
+    ``source_sha`` is intentionally NOT folded into the id (it is still recorded in the
+    manifest's ``sourceSha`` field by build_manifest, for humans/tooling). Deriving the id
+    from the bare commit sha made two builds of the SAME commit share one instanceId; when
+    both were concurrently in-flight the promoter's duplicate-instanceId guard held BOTH
+    releases ``conflicted`` — a deadlock. Keying on the image tag (which differs per build)
+    makes each build a distinct release the promoter serializes via FIFO instead (ST-4190).
+    """
+    return f"{_machine_safe(app)}-{_machine_safe(image_tag)}"
 
 
 def build_manifest(
