@@ -45,7 +45,7 @@ def compute_instance_id(
     """Machine-safe, DETERMINISTIC release identity derived from the DEPLOYMENT PAYLOAD.
 
     The id is ``<app>-<signature>`` where the signature is built from the tags this deploy
-    actually writes: the ``image_tag`` (when it changes ``image.tag``) plus each ``extra_tag``
+    carries: the ``image_tag`` (whenever it is non-empty) plus each ``extra_tag``
     (as ``path=value``). One deploy == one signature: UNIQUE PER FAN-OUT (release-promoter
     DESIGN §2 requires this) yet idempotent per exact payload (a re-run yields the SAME id, so
     HIU's duplicate-fan-out guard still detects it).
