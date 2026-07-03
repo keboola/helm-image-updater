@@ -281,12 +281,16 @@ def test_build_manifest_context_with_real_sha():
     plan = Mock()
     plan.helm_chart = "connection"
     plan.image_tag = "production-abc"
+    plan.extra_tags = None
     plan.metadata = {"source": {"sha": "deadbeef0123FULL", "pr_url": "https://x/pull/1"}}
 
     ctx = _build_manifest_context(plan)
 
     assert ctx["app"] == "connection"
-    assert ctx["instance_id"] == "connection-deadbeef0123"
+    # ST-4190: the id is image_tag-based, NOT sha-based — the real sha is still recorded
+    # in source_sha (below), it just no longer collapses two builds of one commit into
+    # one id (which deadlocked the promoter's duplicate-instanceId guard).
+    assert ctx["instance_id"] == "connection-production-abc"
     assert ctx["display_name"] == "connection@production-abc"
     assert ctx["source_sha"] == "deadbeef0123FULL"
     assert ctx["source_pr"] == "https://x/pull/1"
@@ -296,13 +300,14 @@ def test_build_manifest_context_with_unknown_sha():
     plan = Mock()
     plan.helm_chart = "connection"
     plan.image_tag = "production-abc"
+    plan.extra_tags = None
     plan.metadata = {"source": {"sha": "Unknown"}}
 
     ctx = _build_manifest_context(plan)
 
     assert ctx["source_sha"] is None
     assert ctx["source_pr"] is None
-    # instance_id falls back to hash; must start with "connection-" and be deterministic
+    # instance_id is image_tag-based (ST-4190); must start with "connection-" and be deterministic
     assert ctx["instance_id"].startswith("connection-")
     ctx2 = _build_manifest_context(plan)
     assert ctx["instance_id"] == ctx2["instance_id"]
@@ -312,6 +317,7 @@ def test_build_manifest_context_no_source():
     plan = Mock()
     plan.helm_chart = "connection"
     plan.image_tag = "production-abc"
+    plan.extra_tags = None
     plan.metadata = {}
 
     ctx = _build_manifest_context(plan)
@@ -335,6 +341,7 @@ def test_build_manifest_context_instance_id_matches_compute_instance_id():
     plan = Mock()
     plan.helm_chart = "connection"
     plan.image_tag = "production-abc"
+    plan.extra_tags = None
     plan.metadata = {"source": {"sha": sha}}
 
     ctx = _build_manifest_context(plan)
@@ -347,6 +354,7 @@ def test_guard_matches_anchor_containing_that_instance_id():
     plan = Mock()
     plan.helm_chart = "connection"
     plan.image_tag = "production-abc"
+    plan.extra_tags = None
     plan.metadata = {"source": {"sha": sha}}
 
     ctx = _build_manifest_context(plan)

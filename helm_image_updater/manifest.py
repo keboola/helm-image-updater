@@ -10,10 +10,9 @@ isManifestV1) — keep in sync if the promoter contract changes.
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 MANIFEST_HEADING = "## ⚠️ Release manifest — DO NOT EDIT (machine-read by release-promoter)"
 
@@ -37,21 +36,38 @@ def _machine_safe(app: str) -> str:
     return _UNSAFE_RE.sub("-", app)
 
 
-def compute_instance_id(app: str, source_sha: Optional[str], image_tag: str) -> str:
-    """Machine-safe, DETERMINISTIC id. '<app>-<sha[:12]>' when a real source SHA is
-    available; otherwise '<app>-<sha256(app\\0image_tag)[:12]>' — NOT a random UUID — so a
-    re-run of the same (app, image_tag) yields the SAME id and HIU's idempotency guard still
-    detects a duplicate fan-out when pipeline metadata is absent (the test harness passes no
-    METADATA, F6). With a real SHA the id identifies the source commit (two fan-outs of
-    different image tags built from the same commit share one instanceId — intended). On the
-    hash-fallback path: a different tag → a different id; the promoter's duplicate-instanceId
-    guard is the backstop for a genuine same-tag collision."""
-    safe = _machine_safe(app)
-    sha = (source_sha or "").strip()
-    if sha and sha.lower() != "unknown":
-        return f"{safe}-{_machine_safe(sha[:12])}"
-    digest = hashlib.sha256(f"{app}\0{image_tag}".encode()).hexdigest()[:12]
-    return f"{safe}-{digest}"
+def compute_instance_id(
+    app: str,
+    source_sha: Optional[str],
+    image_tag: str,
+    extra_tags: Optional[List[Dict[str, str]]] = None,
+) -> str:
+    """Machine-safe, DETERMINISTIC release identity derived from the DEPLOYMENT PAYLOAD.
+
+    The id is ``<app>-<signature>`` where the signature is built from the tags this deploy
+    carries: the ``image_tag`` (whenever it is non-empty) plus each ``extra_tag``
+    (as ``path=value``). One deploy == one signature: UNIQUE PER FAN-OUT (release-promoter
+    DESIGN §2 requires this) yet idempotent per exact payload (a re-run yields the SAME id, so
+    HIU's duplicate-fan-out guard still detects it).
+
+    - image-tag bump (common case)              -> ``<app>-<image_tag>``
+    - extra-tags-only (image.tag untouched)     -> ``<app>-<path=value>[-<path=value>...]``
+    - both                                      -> ``<app>-<image_tag>-<path=value>``
+
+    ``source_sha`` is NOT folded into the id (it is still recorded in the manifest's
+    ``sourceSha`` field). Keying on the bare commit sha made two builds of ONE commit share an
+    id and deadlock the promoter's duplicate-instanceId guard; keying on the payload fixes that
+    AND keeps extra-tags-only deploys unique (ST-4190). Falls back to ``source_sha`` only if a
+    deploy changes no tag at all, so the id is never the degenerate ``<app>-``.
+    """
+    parts: List[str] = []
+    if image_tag and image_tag.strip():
+        parts.append(_machine_safe(image_tag))
+    for tag in extra_tags or []:
+        parts.append(_machine_safe(f"{tag.get('path', '')}={tag.get('value', '')}"))
+    if not parts:
+        parts.append(_machine_safe((source_sha or "notag")[:12]) or "notag")
+    return f"{_machine_safe(app)}-{'-'.join(parts)}"
 
 
 def build_manifest(

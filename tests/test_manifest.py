@@ -49,8 +49,42 @@ _REMOVE = _Sentinel()  # sentinel for "remove this key"
 # existing tests (unchanged)
 # ---------------------------------------------------------------------------
 
-def test_compute_instance_id_from_sha():
-    assert compute_instance_id("connection", "abcdef0123456789", "t") == "connection-abcdef012345"
+def test_compute_instance_id_from_image_tag():
+    # ST-4190: id is '<app>-<image_tag>' — UNIQUE PER FAN-OUT. The source sha is IGNORED
+    # (two builds of the same commit must NOT share an instanceId, or the promoter's
+    # duplicate-instanceId guard deadlocks both while they are concurrently in-flight).
+    assert compute_instance_id("connection", "abcdef0123456789", "production-abc-4448") == "connection-production-abc-4448"
+    # Idempotent per exact (app, image_tag) — independent of the sha argument.
+    assert compute_instance_id("connection", "deadbeef", "production-abc-4448") == compute_instance_id("connection", None, "production-abc-4448")
+    # Two builds of the SAME commit (different tags) → DIFFERENT ids (the deadlock fix).
+    assert compute_instance_id("connection", "abcdef", "production-abc-4447") != compute_instance_id("connection", "abcdef", "production-abc-4448")
+
+
+def test_compute_instance_id_extra_tags_only():
+    # ST-4190: an extra-tags-only deploy (image.tag untouched -> empty image_tag) must still
+    # yield a UNIQUE, non-degenerate id derived from the extra tag(s), NOT "<app>-".
+    a = compute_instance_id("job-queue-daemon", "sha", "", extra_tags=[{"path": "jobQueueRunnerImage.tag", "value": "production-aaa"}])
+    b = compute_instance_id("job-queue-daemon", "sha", "", extra_tags=[{"path": "jobQueueRunnerImage.tag", "value": "production-bbb"}])
+    assert a != "job-queue-daemon-"          # not degenerate
+    assert a != b                            # distinct extra values -> distinct ids
+    assert a.startswith("job-queue-daemon-") and INSTANCE_ID_RE.fullmatch(a)
+    # Idempotent per exact payload (a re-run of the same extra-tag deploy -> same id).
+    assert a == compute_instance_id("job-queue-daemon", "sha", "", extra_tags=[{"path": "jobQueueRunnerImage.tag", "value": "production-aaa"}])
+
+
+def test_compute_instance_id_image_and_extra_tags():
+    # image_tag present + an extra tag -> both folded in; still starts with the readable image id.
+    iid = compute_instance_id("connection", "sha", "production-abc-4448", extra_tags=[{"path": "sidecar.tag", "value": "v9"}])
+    assert iid.startswith("connection-production-abc-4448-") and INSTANCE_ID_RE.fullmatch(iid)
+    # No extra tags -> EXACTLY the image-only contract (unchanged; the e2e #5094 assertion).
+    assert compute_instance_id("connection", "sha", "production-abc-4448") == "connection-production-abc-4448"
+    assert compute_instance_id("connection", "sha", "production-abc-4448", extra_tags=[]) == "connection-production-abc-4448"
+
+
+def test_compute_instance_id_no_tags_is_non_degenerate():
+    # Defensive: no image_tag AND no extra tags -> fall back to source_sha, never "<app>-".
+    assert compute_instance_id("app", "deadbeefcafe00", "") == "app-deadbeefcafe"
+    assert compute_instance_id("app", None, "") == "app-notag"
 
 
 def test_compute_instance_id_is_machine_safe_even_for_unsafe_app():
@@ -116,12 +150,13 @@ def test_extract_instance_id_returns_none_on_bad_body(body):
 
 
 # ---------------------------------------------------------------------------
-# Finding 2: compute_instance_id must sanitize the sha-derived suffix too
+# compute_instance_id must sanitize the image_tag it now embeds (ST-4190)
 # ---------------------------------------------------------------------------
 
-def test_compute_instance_id_unsafe_sha_is_sanitized():
-    """sha from external pipeline metadata can contain unsafe chars; must be sanitized."""
-    iid = compute_instance_id("connection", "abc def:gh@i", "t")
+def test_compute_instance_id_unsafe_image_tag_is_sanitized():
+    """image_tag now feeds the id (ST-4190); any unsafe chars must be sanitized so the
+    manifest can never carry an instanceId the promoter would reject."""
+    iid = compute_instance_id("connection", "deadbeef", "prod tag:weird@1")
     # Must be a valid instanceId charset — no whitespace, ':', or '@'.
     assert INSTANCE_ID_RE.fullmatch(iid), f"unsafe id: {iid!r}"
     # Must still be prefixed with the safe app name.

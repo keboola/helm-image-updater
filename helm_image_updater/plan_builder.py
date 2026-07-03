@@ -558,7 +558,7 @@ def _build_manifest_context(plan: UpdatePlan) -> Dict[str, Any]:
     source_pr = source.get("pr_url")
     return {
         "app": plan.helm_chart,
-        "instance_id": compute_instance_id(plan.helm_chart, source_sha, plan.image_tag),
+        "instance_id": compute_instance_id(plan.helm_chart, source_sha, plan.image_tag, plan.extra_tags),
         "display_name": f"{plan.helm_chart}@{plan.image_tag}",
         "source_sha": source_sha if (source_sha and str(source_sha).lower() != "unknown") else None,
         "source_pr": source_pr or None,
