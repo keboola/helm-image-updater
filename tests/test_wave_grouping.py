@@ -281,6 +281,7 @@ def test_build_manifest_context_with_real_sha():
     plan = Mock()
     plan.helm_chart = "connection"
     plan.image_tag = "production-abc"
+    plan.extra_tags = None
     plan.metadata = {"source": {"sha": "deadbeef0123FULL", "pr_url": "https://x/pull/1"}}
 
     ctx = _build_manifest_context(plan)
@@ -299,6 +300,7 @@ def test_build_manifest_context_with_unknown_sha():
     plan = Mock()
     plan.helm_chart = "connection"
     plan.image_tag = "production-abc"
+    plan.extra_tags = None
     plan.metadata = {"source": {"sha": "Unknown"}}
 
     ctx = _build_manifest_context(plan)
@@ -315,6 +317,7 @@ def test_build_manifest_context_no_source():
     plan = Mock()
     plan.helm_chart = "connection"
     plan.image_tag = "production-abc"
+    plan.extra_tags = None
     plan.metadata = {}
 
     ctx = _build_manifest_context(plan)
@@ -338,6 +341,7 @@ def test_build_manifest_context_instance_id_matches_compute_instance_id():
     plan = Mock()
     plan.helm_chart = "connection"
     plan.image_tag = "production-abc"
+    plan.extra_tags = None
     plan.metadata = {"source": {"sha": sha}}
 
     ctx = _build_manifest_context(plan)
@@ -350,6 +354,7 @@ def test_guard_matches_anchor_containing_that_instance_id():
     plan = Mock()
     plan.helm_chart = "connection"
     plan.image_tag = "production-abc"
+    plan.extra_tags = None
     plan.metadata = {"source": {"sha": sha}}
 
     ctx = _build_manifest_context(plan)

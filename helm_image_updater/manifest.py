@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 MANIFEST_HEADING = "## ⚠️ Release manifest — DO NOT EDIT (machine-read by release-promoter)"
 
@@ -36,21 +36,38 @@ def _machine_safe(app: str) -> str:
     return _UNSAFE_RE.sub("-", app)
 
 
-def compute_instance_id(app: str, source_sha: Optional[str], image_tag: str) -> str:
-    """Machine-safe, DETERMINISTIC release identity: ``<app>-<image_tag>``.
+def compute_instance_id(
+    app: str,
+    source_sha: Optional[str],
+    image_tag: str,
+    extra_tags: Optional[List[Dict[str, str]]] = None,
+) -> str:
+    """Machine-safe, DETERMINISTIC release identity derived from the DEPLOYMENT PAYLOAD.
 
-    One image tag == one release. The id is UNIQUE PER FAN-OUT (release-promoter DESIGN
-    §2 requires this) yet idempotent per exact (app, image_tag): a re-run of the same
-    deploy yields the SAME id, so HIU's duplicate-fan-out guard still detects it.
+    The id is ``<app>-<signature>`` where the signature is built from the tags this deploy
+    actually writes: the ``image_tag`` (when it changes ``image.tag``) plus each ``extra_tag``
+    (as ``path=value``). One deploy == one signature: UNIQUE PER FAN-OUT (release-promoter
+    DESIGN §2 requires this) yet idempotent per exact payload (a re-run yields the SAME id, so
+    HIU's duplicate-fan-out guard still detects it).
 
-    ``source_sha`` is intentionally NOT folded into the id (it is still recorded in the
-    manifest's ``sourceSha`` field by build_manifest, for humans/tooling). Deriving the id
-    from the bare commit sha made two builds of the SAME commit share one instanceId; when
-    both were concurrently in-flight the promoter's duplicate-instanceId guard held BOTH
-    releases ``conflicted`` — a deadlock. Keying on the image tag (which differs per build)
-    makes each build a distinct release the promoter serializes via FIFO instead (ST-4190).
+    - image-tag bump (common case)              -> ``<app>-<image_tag>``
+    - extra-tags-only (image.tag untouched)     -> ``<app>-<path=value>[-<path=value>...]``
+    - both                                      -> ``<app>-<image_tag>-<path=value>``
+
+    ``source_sha`` is NOT folded into the id (it is still recorded in the manifest's
+    ``sourceSha`` field). Keying on the bare commit sha made two builds of ONE commit share an
+    id and deadlock the promoter's duplicate-instanceId guard; keying on the payload fixes that
+    AND keeps extra-tags-only deploys unique (ST-4190). Falls back to ``source_sha`` only if a
+    deploy changes no tag at all, so the id is never the degenerate ``<app>-``.
     """
-    return f"{_machine_safe(app)}-{_machine_safe(image_tag)}"
+    parts: List[str] = []
+    if image_tag and image_tag.strip():
+        parts.append(_machine_safe(image_tag))
+    for tag in extra_tags or []:
+        parts.append(_machine_safe(f"{tag.get('path', '')}={tag.get('value', '')}"))
+    if not parts:
+        parts.append(_machine_safe((source_sha or "notag")[:12]) or "notag")
+    return f"{_machine_safe(app)}-{'-'.join(parts)}"
 
 
 def build_manifest(

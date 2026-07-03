@@ -60,6 +60,33 @@ def test_compute_instance_id_from_image_tag():
     assert compute_instance_id("connection", "abcdef", "production-abc-4447") != compute_instance_id("connection", "abcdef", "production-abc-4448")
 
 
+def test_compute_instance_id_extra_tags_only():
+    # ST-4190: an extra-tags-only deploy (image.tag untouched -> empty image_tag) must still
+    # yield a UNIQUE, non-degenerate id derived from the extra tag(s), NOT "<app>-".
+    a = compute_instance_id("job-queue-daemon", "sha", "", extra_tags=[{"path": "jobQueueRunnerImage.tag", "value": "production-aaa"}])
+    b = compute_instance_id("job-queue-daemon", "sha", "", extra_tags=[{"path": "jobQueueRunnerImage.tag", "value": "production-bbb"}])
+    assert a != "job-queue-daemon-"          # not degenerate
+    assert a != b                            # distinct extra values -> distinct ids
+    assert a.startswith("job-queue-daemon-") and INSTANCE_ID_RE.fullmatch(a)
+    # Idempotent per exact payload (a re-run of the same extra-tag deploy -> same id).
+    assert a == compute_instance_id("job-queue-daemon", "sha", "", extra_tags=[{"path": "jobQueueRunnerImage.tag", "value": "production-aaa"}])
+
+
+def test_compute_instance_id_image_and_extra_tags():
+    # image_tag present + an extra tag -> both folded in; still starts with the readable image id.
+    iid = compute_instance_id("connection", "sha", "production-abc-4448", extra_tags=[{"path": "sidecar.tag", "value": "v9"}])
+    assert iid.startswith("connection-production-abc-4448-") and INSTANCE_ID_RE.fullmatch(iid)
+    # No extra tags -> EXACTLY the image-only contract (unchanged; the e2e #5094 assertion).
+    assert compute_instance_id("connection", "sha", "production-abc-4448") == "connection-production-abc-4448"
+    assert compute_instance_id("connection", "sha", "production-abc-4448", extra_tags=[]) == "connection-production-abc-4448"
+
+
+def test_compute_instance_id_no_tags_is_non_degenerate():
+    # Defensive: no image_tag AND no extra tags -> fall back to source_sha, never "<app>-".
+    assert compute_instance_id("app", "deadbeefcafe00", "") == "app-deadbeefcafe"
+    assert compute_instance_id("app", None, "") == "app-notag"
+
+
 def test_compute_instance_id_is_machine_safe_even_for_unsafe_app():
     # An app name with forbidden chars (defensive) must still yield a valid instanceId.
     iid = compute_instance_id("my app:weird@chart", "deadBEEF00112233", "t")
