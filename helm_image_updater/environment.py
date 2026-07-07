@@ -134,14 +134,33 @@ class EnvironmentConfig:
         config._deploy_strategy_error = deploy_strategy_error
         return config
     
+    def _production_rollout_tag(self) -> str:
+        """The tag that decides whether a production rollout (wave / manual-per-stack)
+        is valid.
+
+        Mirrors ``plan_builder._determine_strategy`` precedence: ``IMAGE_TAG`` when set,
+        otherwise the first non-empty ``EXTRA_TAG`` value. This lets an extra-tags-only
+        production deploy (empty ``IMAGE_TAG`` + a production/semver ``EXTRA_TAG``, e.g.
+        ``jobQueueRunnerImage.tag:production-…``) drive these strategies, since the
+        manifest identity (``compute_instance_id``) and stack selection already support it.
+        Returns ``""`` when no tag is carried.
+        """
+        if self.image_tag:
+            return self.image_tag
+        for tag in self.extra_tags:
+            value = tag.get("value", "")
+            if value:
+                return value
+        return ""
+
     def validate(self) -> List[str]:
         """Validate the configuration.
-        
+
         Returns:
             List of error messages (empty if valid)
         """
         from .tag_classification import detect_tag_type, TagType
-        
+
         errors = []
         
         # Required fields
@@ -197,34 +216,40 @@ class EnvironmentConfig:
             errors.append(self._deploy_strategy_error)
 
         if self.deploy_strategy.is_wave:
+            rollout_tag = self._production_rollout_tag()
             if self.override_stack:
                 errors.append("DEPLOY_STRATEGY wave modes are incompatible with OVERRIDE_STACK")
-            elif not self.image_tag:
+            elif not rollout_tag:
                 errors.append(
-                    f"DEPLOY_STRATEGY '{self.deploy_strategy.value}' requires a production/semver IMAGE_TAG"
+                    f"DEPLOY_STRATEGY '{self.deploy_strategy.value}' requires a production/semver "
+                    f"IMAGE_TAG or EXTRA_TAG"
                 )
             else:
-                tag_type = detect_tag_type(self.image_tag)
+                tag_type = detect_tag_type(rollout_tag)
                 if tag_type not in (TagType.PRODUCTION, TagType.SEMVER):
                     errors.append(
                         f"DEPLOY_STRATEGY '{self.deploy_strategy.value}' requires a production/semver "
-                        f"IMAGE_TAG, got '{self.image_tag}'"
+                        f"IMAGE_TAG or EXTRA_TAG, got '{rollout_tag}'"
                     )
 
         # manual-per-stack (ST-4157): a production rollout (one PR per prod stack), so it
-        # requires a production/semver tag and is incompatible with OVERRIDE_STACK — same
-        # as the wave strategies (kept separate so the wave error strings stay unchanged).
+        # requires a production/semver tag (via IMAGE_TAG or an EXTRA_TAG) and is
+        # incompatible with OVERRIDE_STACK — same as the wave strategies (kept separate so
+        # its error strings can name the strategy explicitly).
         if self.deploy_strategy == DeployStrategy.MANUAL_PER_STACK:
+            rollout_tag = self._production_rollout_tag()
             if self.override_stack:
                 errors.append("DEPLOY_STRATEGY manual-per-stack is incompatible with OVERRIDE_STACK")
-            elif not self.image_tag:
-                errors.append("DEPLOY_STRATEGY 'manual-per-stack' requires a production/semver IMAGE_TAG")
+            elif not rollout_tag:
+                errors.append(
+                    "DEPLOY_STRATEGY 'manual-per-stack' requires a production/semver IMAGE_TAG or EXTRA_TAG"
+                )
             else:
-                tag_type = detect_tag_type(self.image_tag)
+                tag_type = detect_tag_type(rollout_tag)
                 if tag_type not in (TagType.PRODUCTION, TagType.SEMVER):
                     errors.append(
                         f"DEPLOY_STRATEGY 'manual-per-stack' requires a production/semver "
-                        f"IMAGE_TAG, got '{self.image_tag}'"
+                        f"IMAGE_TAG or EXTRA_TAG, got '{rollout_tag}'"
                     )
 
         return errors
