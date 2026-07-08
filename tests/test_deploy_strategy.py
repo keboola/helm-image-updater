@@ -102,13 +102,42 @@ def test_explicit_standard_overrides_multi_stage_flag():
     assert cfg.multi_stage is False
 
 
-def test_wave_strategy_requires_image_tag_not_just_extra_tag():
+def test_wave_strategy_ok_with_production_extra_tag_only():
+    # Extra-tags-only production rollout (empty IMAGE_TAG, production EXTRA_TAG) is valid:
+    # the manifest identity and stack selection already support it. Regression for the
+    # job-queue-daemon jobQueueRunnerImage.tag production deploy that failed validation.
     cfg = EnvironmentConfig.from_env({
         "HELM_CHART": "dummy-service", "GH_TOKEN": "t", "GH_APPROVE_TOKEN": "a",
-        "EXTRA_TAG1": "image.tag:production-abc", "DEPLOY_STRATEGY": "gradual",
+        "EXTRA_TAG1": "jobQueueRunnerImage.tag:production-abc", "DEPLOY_STRATEGY": "critical-manual-gate",
+    })
+    assert cfg.validate() == []
+
+
+def test_wave_strategy_rejects_dev_extra_tag_only():
+    # A dev tag (even via EXTRA_TAG) cannot drive a production wave rollout.
+    cfg = EnvironmentConfig.from_env({
+        "HELM_CHART": "dummy-service", "GH_TOKEN": "t", "GH_APPROVE_TOKEN": "a",
+        "EXTRA_TAG1": "image.tag:dev-abc", "DEPLOY_STRATEGY": "gradual",
     })
     errors = cfg.validate()
-    assert any("IMAGE_TAG" in e for e in errors)
+    assert any("requires a production" in e for e in errors)
+
+
+def test_manual_per_stack_ok_with_production_extra_tag_only():
+    cfg = EnvironmentConfig.from_env({
+        "HELM_CHART": "dummy-service", "GH_TOKEN": "t", "GH_APPROVE_TOKEN": "a",
+        "EXTRA_TAG1": "image.tag:production-abc", "DEPLOY_STRATEGY": "manual-per-stack",
+    })
+    assert cfg.validate() == []
+
+
+def test_manual_per_stack_rejects_dev_extra_tag_only():
+    cfg = EnvironmentConfig.from_env({
+        "HELM_CHART": "dummy-service", "GH_TOKEN": "t", "GH_APPROVE_TOKEN": "a",
+        "EXTRA_TAG1": "image.tag:dev-abc", "DEPLOY_STRATEGY": "manual-per-stack",
+    })
+    errors = cfg.validate()
+    assert any("requires a production" in e for e in errors)
 
 
 # Task 5: resolve_wave
