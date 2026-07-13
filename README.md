@@ -7,9 +7,9 @@ A Python tool for automating image tag updates across Helm charts in different K
 - Updates image tags in Helm charts across multiple stacks
 - Supports both development and production deployments
 - Creates pull requests with detailed descriptions
-- Optional auto-merge functionality
+- Production deploys are always release-promoter-managed; dev/canary/override deploys are auto-merged fast by HIU
 - Dry-run mode for testing changes
-- Multi-stage deployment support
+- Promoter rollout strategies (standard 2-wave, gradual/critical waves, manual-per-stack)
 - Extra tag updates for complex configurations
 - Detailed logging and error handling
 - Automatically removes ArgoCD branch overrides (`appManifestsRevision`) from `values.yaml` in the same PR
@@ -52,10 +52,8 @@ Required:
 
 Optional:
 
-- `AUTOMERGE`: Whether to automatically merge PRs (default: "true", note: canary updates are always auto-merged). When set to `false`, PRs are auto-approved by the machine user instead, satisfying CODEOWNERS requirements so humans can merge without waiting for additional reviews.
 - `DRY_RUN`: Whether to perform a dry run (default: "false")
-- `MULTI_STAGE`: Enable multi-stage deployment (default: "false"). **Deprecated** — alias for `DEPLOY_STRATEGY=cloud_multi_stage`; prefer `DEPLOY_STRATEGY`.
-- `DEPLOY_STRATEGY`: Rollout strategy (default: "standard"): `standard`, `cloud_multi_stage`, `gradual`, `critical`, `critical-manual-gate`, or `manual-per-stack`. See [Deploy Strategies](#deploy-strategies).
+- `DEPLOY_STRATEGY`: Rollout strategy (default/empty: `standard`): `standard`, `gradual`, `critical`, `critical-manual-gate`, or `manual-per-stack`. See [Deploy Strategies](#deploy-strategies). Whether a PR auto-merges is decided by tag class + target stacks (see [Auto-merge](#auto-merge-and-auto-approve)), not by a knob.
 - `TARGET_PATH`: Path to the directory containing the stacks (default: ".")
 - `OVERRIDE_STACK`: Stack ID to explicitly target for the update, bypassing automatic stack selection (default: None)
 - `EXTRA_TAG1`, `EXTRA_TAG2`: Additional tags to update (format: "path:value")
@@ -83,14 +81,12 @@ Dry run:
 Minimal usage example (always pin to a released version — see [Releasing](#releasing); the action runs the code from the pinned tag):
 
 ```yaml
-- uses: "keboola/helm-image-updater@v0.15.0"
+- uses: "keboola/helm-image-updater@v0.23.0"
   with:
     helm-chart: "dummy-service"
     image-tag: "dev-b10536c41180e420eaf083451a1ddee132f512c6"
-    automerge: "true"
     dry-run: "false"
-    multi-stage: "false"
-    deploy-strategy: ""  # standard | cloud_multi_stage | gradual | critical | critical-manual-gate | manual-per-stack
+    deploy-strategy: ""  # empty = standard | gradual | critical | critical-manual-gate | manual-per-stack
     override-stack: "dev-keboola-gcp-us-central1"
     extra-tag1: "agent.image.tag:dev-2.0.0"
     extra-tag2: "messenger.image.tag:dev-2.0.0"
@@ -114,23 +110,13 @@ on:
         required: false
         type: string
         default: ''
-      automerge:
-        description: "Automatically merge PRs"
-        required: false
-        type: boolean
-        default: true
       dry-run:
         description: "Do a dry run"
         required: false
         type: boolean
         default: false
-      multi-stage:
-        description: "Enable multi-stage deployment (auto-merge dev, manual prod). Deprecated alias for deploy-strategy=cloud_multi_stage."
-        required: false
-        type: boolean
-        default: false
       deploy-strategy:
-        description: "Rollout strategy: standard | cloud_multi_stage | gradual | critical | critical-manual-gate | manual-per-stack"
+        description: "Rollout strategy (empty = standard): standard | gradual | critical | critical-manual-gate | manual-per-stack"
         required: false
         type: string
         default: ''
@@ -179,13 +165,11 @@ jobs:
         with:
           user: bot
 
-      - uses: keboola/helm-image-updater@v0.15.0
+      - uses: keboola/helm-image-updater@v0.23.0
         with:
           helm-chart: ${{ inputs.helm-chart }}
           image-tag: ${{ inputs.image-tag }}
-          automerge: ${{ inputs.automerge }}
           dry-run: ${{ inputs.dry-run }}
-          multi-stage: ${{ inputs.multi-stage }}
           deploy-strategy: ${{ inputs.deploy-strategy }}
           override-stack: ${{ inputs.override-stack }}
           extra-tag1: ${{ inputs.extra-tag1 }}
@@ -212,25 +196,30 @@ Image tags must follow these formats:
 
 ### Development Updates
 
-- Updates only development stacks
-- Auto-merge behavior follows the `automerge` setting
+- Updates only development (and, via `override-stack`, e2e) stacks
+- Auto-merged fast by HIU (a dev/e2e target is never production)
 
 ### Production Updates
 
-- Updates production stacks
-- Auto-merge behavior follows the `automerge` setting
-- In multi-stage mode, creates separate PRs for dev and prod stacks
+- Updates all stacks the production tag lands on (dev + prod)
+- Always release-promoter-managed: HIU creates the PRs **unmerged** (and auto-approved); release-promoter merges them. HIU never merges a PR that targets a production stack.
+- Fanned out per the selected strategy — `standard` (2-wave dev→prod, the default), the wave strategies, or `manual-per-stack`
 
 ### Canary Updates
 
 - Updates only the specific canary stack matching the tag prefix
-- Always auto-merges regardless of the `automerge` setting
+- Always auto-merged by HIU (targets its own `canary-*` branch)
 - Uses stack-specific base branches (e.g., `canary-orion`)
 - Supports extra tags for complex configurations
 
-## Auto-Approve
+## Auto-merge and Auto-approve
 
-When `AUTOMERGE` is set to `false`, created PRs are automatically approved using the `GH_APPROVE_TOKEN` (machine user `keboola-sre-approve-bot`). This satisfies CODEOWNERS approval requirements so that humans can merge PRs without waiting for additional reviews. Auto-approve is skipped when `AUTOMERGE=true` (since PRs are merged immediately) and during dry runs.
+HIU decides whether to **merge** a PR itself purely from the **effective tag class** (across `image_tag` + extra tags) and the **target stacks** — there is no `AUTOMERGE` knob (ST-4169/ST-4159):
+
+- **Production/semver-class** deploy, or any PR whose targets include a production stack → **not merged** by HIU. It is created unmerged and **auto-approved** with `GH_APPROVE_TOKEN` (machine user `keboola-sre-approve-bot`, satisfying CODEOWNERS) so release-promoter — or a human, for `manual-per-stack` — can merge it.
+- **Dev / canary / `pr-test-*` (non-production-class)** deploy to non-production stacks (dev, e2e, canary, override) → **auto-merged** by HIU immediately.
+
+Auto-approve and merge are both skipped during dry runs. `wave` and `manual-per-stack` PRs are always created unmerged regardless of tag class.
 
 ## Override Removal
 
@@ -267,27 +256,21 @@ If `argocdApplication` only contained `appManifestsRevision`, the entire block i
 
 ## Deploy Strategies
 
-`DEPLOY_STRATEGY` (action input `deploy-strategy`, default `standard`) selects how a production update is fanned out into PRs and who merges them. It supersedes the older boolean `MULTI_STAGE` flag.
+`DEPLOY_STRATEGY` (action input `deploy-strategy`) selects how a **production** update is fanned out into PRs. Every production deploy is release-promoter-managed — HIU creates the PRs unmerged and the promoter (or, for `manual-per-stack`, a human) merges them. An **empty** `DEPLOY_STRATEGY` resolves to `standard`, the universal default (ST-4131/ST-4159). There is no `cloud_multi_stage`, `MULTI_STAGE`, or `AUTOMERGE` any more.
 
-| `DEPLOY_STRATEGY` | grouping | `AUTOMERGE=true` | `AUTOMERGE=false` |
-|---|---|---|---|
-| _unset_ (legacy default) | one PR (per-stack for a production tag) | merge the PR(s) | leave unmerged (per-stack) |
-| `standard` (explicit) | promoter-managed **2-wave dev→prod**: wave 0 = all dev stacks (anchor, carries the manifest), wave 1 = all prod stacks | *(ignored)* — **2 unmerged wave PRs**, release-promoter merges dev → prod | **2 unmerged wave PRs** — release-promoter merges dev → prod |
-| `cloud_multi_stage` | dev + prod PRs per cloud | merge dev, leave prod | leave all unmerged |
-| `gradual` · `critical` · `critical-manual-gate` | 4 unmerged **wave** PRs (waves 0–3) | *(ignored — release-promoter merges)* | *(release-promoter merges)* |
-| `manual-per-stack` | promoter-managed **one PR per stack (dev + prod), no waves** | *(ignored)* — **N unmerged member PRs**, a human merges each in any order | **N unmerged member PRs** — a human merges each in any order |
+| `DEPLOY_STRATEGY` | grouping | who merges |
+|---|---|---|
+| empty → `standard` | promoter-managed **2-wave dev→prod**: wave 0 = all dev stacks (anchor, carries the manifest), wave 1 = all prod stacks | release-promoter merges dev → prod |
+| `gradual` · `critical` · `critical-manual-gate` | 4 unmerged **wave** PRs (waves 0–3) | release-promoter merges wave-by-wave |
+| `manual-per-stack` | **one PR per stack (dev + prod), no waves** | a human merges each in any order; release-promoter completes |
 
-### New vs. old parameters
-
-- **`DEPLOY_STRATEGY` is the single knob.** Leaving it unset keeps today's behavior — existing deploys are unaffected. An **explicit** `DEPLOY_STRATEGY=standard` opts the app into the promoter-managed 2-wave dev→prod release (see below); the unset default does **not**, so this is a deliberate, app-by-app opt-in.
-- **`MULTI_STAGE=true` is a deprecated alias for `DEPLOY_STRATEGY=cloud_multi_stage`** — identical behavior, kept for backward compatibility. If both are set, the explicit `DEPLOY_STRATEGY` wins.
-- **`AUTOMERGE`** still controls merging for the legacy default and `cloud_multi_stage`. For an **explicit `standard`** and the wave strategies (`gradual` / `critical` / `critical-manual-gate`) it is **ignored** — those PRs are always created unmerged (and auto-approved) and merged later by release-promoter.
+Non-production deploys (`dev-*` / `canary-*` tags and `override-stack` targets) ignore `DEPLOY_STRATEGY` — they stay single-PR deploys and are auto-merged by HIU (see [Auto-merge](#auto-merge-and-auto-approve)).
 
 ### Promoter-managed `standard` (2-wave dev→prod)
 
-An **explicit** `DEPLOY_STRATEGY=standard` on a **`production-` tag** emits the app as a promoter-managed **2-wave** release (`AUTOMERGE` is ignored, like the wave strategies): **wave 0 = all dev stacks** (the anchor — it carries the JSON release manifest), **wave 1 = all prod stacks** (the positive `is_production` set, so canary/excluded stacks are never mis-binned into prod). The cloud dimension is collapsed (no per-cloud split). Both PRs are created unmerged and labelled `release:wave:{0,1}` + `deploy:standard`. [release-promoter](https://github.com/keboola/release-promoter) merges the dev wave, waits for its ArgoCD **sync** (no UAT, no soak), then merges the prod wave. An app present in only one tier (no dev stacks → 1-wave prod) degenerates to a **single-wave** release (wave 0 only), which the promoter handles count-agnostically. Identity is `instanceId = <app>-<image_tag>` (no cloud suffix), derived from the deployed tag(s) — the image tag, or for an `image.tag`-untouched deploy the extra tag(s) as `<path>=<value>` — so each build is unique; a duplicate fan-out for the same `instanceId` is refused while an anchor is still open.
+A **`production-`/semver tag** with `DEPLOY_STRATEGY` resolving to `standard` (i.e. the default — empty or explicit) emits the app as a promoter-managed **2-wave** release: **wave 0 = all dev stacks** (the anchor — it carries the JSON release manifest), **wave 1 = all prod stacks** (the positive `is_production` set, so canary/excluded stacks are never mis-binned into prod). The cloud dimension is collapsed (no per-cloud split). Both PRs are created unmerged and labelled `release:wave:{0,1}` + `deploy:standard`. [release-promoter](https://github.com/keboola/release-promoter) merges the dev wave, waits for its ArgoCD **sync** (no UAT, no soak), then merges the prod wave. An app present in only one tier (no dev stacks → 1-wave prod) degenerates to a **single-wave** release (wave 0 only), which the promoter handles count-agnostically. Identity is `instanceId = <app>-<image_tag>` (no cloud suffix), derived from the deployed tag(s) — the image tag, or for an `image.tag`-untouched deploy the extra tag(s) as `<path>=<value>` — so each build is unique; a duplicate fan-out for the same `instanceId` is refused while an anchor is still open.
 
-Only **`PRODUCTION`** deploys are staged: a `dev-*` tag (DEV), a `canary-*` tag, and an `override-stack` deploy are **not** promoter-managed even with explicit `DEPLOY_STRATEGY=standard` — they keep their existing handling (a dev push stays a fast, auto-merged deploy; canary auto-merges to its own branch; override is a single PR). This keeps routine dev deploys from being turned into unmerged wave PRs the promoter must merge.
+Only **`PRODUCTION`** deploys are staged: a `dev-*` tag (DEV), a `canary-*` tag, and an `override-stack` deploy are **not** promoter-managed — they keep their existing handling (a dev push stays a fast, auto-merged deploy; canary auto-merges to its own branch; override is a single PR). This keeps routine dev deploys from being turned into unmerged wave PRs the promoter must merge. HIU has **no code path** that merges a PR whose targets include a production stack.
 
 ### Wave strategies (release-promoter)
 
@@ -377,19 +360,19 @@ The test suite verifies the following functionality:
 - Development tag handling (`dev-*`)
 
   - Single stack updates
-  - Automerge functionality
+  - Auto-merged by HIU (non-production target)
   - Tag file modifications
 
 - Production tag handling (`production-*`)
 
-  - Multiple stack updates
-  - Multi-stage deployment support
+  - Promoter-managed rollout (unmerged PRs); never merged by HIU
+  - Standard 2-wave / wave / manual-per-stack grouping
   - Concurrent stack updates
 
 - Canary tag handling (`canary-*`)
 
   - Stack-specific updates
-  - Automatic auto-merge
+  - Auto-merged by HIU to the canary branch
   - Base branch targeting
   - Extra tag support
 

@@ -82,11 +82,16 @@ The tool determines update strategy based on image tag prefix:
 - Stack types are defined in `config.py` as constants (`DEV_STACKS`, `CANARY_STACKS`)
 - Ignored folders and excluded stacks are also configured in `config.py`
 
-### Multi-Stage Deployment
+### Deploy strategies (production is always promoter-managed)
 
-When `MULTI_STAGE=true`:
-1. Creates and auto-merges PR for dev stacks (if automerge is enabled)
-2. Creates separate PR for production stacks (without auto-merge)
+Every production/semver deploy is release-promoter-managed — HIU creates the PRs
+**unmerged** (auto-approved) and never merges a PR that targets a production stack.
+`DEPLOY_STRATEGY` (empty = `standard`) selects the fan-out: `standard` (2-wave
+dev→prod), `gradual`/`critical`/`critical-manual-gate` (4 waves), or `manual-per-stack`
+(one PR per stack). Non-production deploys (`dev-*`/`canary-*` tags, `override-stack`
+targets) ignore `DEPLOY_STRATEGY` and are auto-merged by HIU. Auto-merge is decided by
+tag class + target stacks — there is no `AUTOMERGE`/`MULTI_STAGE`/`cloud_multi_stage`
+(removed in ST-4169/ST-4159).
 
 ### GitHub Actions Integration
 
@@ -101,19 +106,18 @@ The tool is designed to run as a GitHub Action via `action.yaml`. It:
 - `HELM_CHART`: Name of the Helm chart to update (required)
 - `IMAGE_TAG`: New image tag (must match specific prefixes)
 - `GH_TOKEN`: GitHub access token (required)
-- `AUTOMERGE`: Auto-merge PRs (default: "true")
 - `DRY_RUN`: Perform dry run (default: "false")
-- `MULTI_STAGE`: Enable multi-stage deployment (default: "false")
+- `DEPLOY_STRATEGY`: Rollout strategy (empty = `standard`): standard | gradual | critical | critical-manual-gate | manual-per-stack
 - `OVERRIDE_STACK`: Target specific stack bypassing automatic selection
 - `EXTRA_TAG1`, `EXTRA_TAG2`: Additional tags in format "path.in.yaml:value"
 
 ## Testing Strategy
 
 The test suite covers:
-- Development tag handling and single stack updates
-- Production tag handling with multiple stack updates
+- Development tag handling and single stack updates (auto-merged)
+- Production tag handling: promoter-managed rollout (unmerged PRs), never merged by HIU
 - Canary tag handling with stack-specific updates
-- Multi-stage deployment scenarios
+- Deploy-strategy grouping (standard 2-wave, wave strategies, manual-per-stack)
 - Git operations and PR creation
 - Configuration validation and error handling
 
