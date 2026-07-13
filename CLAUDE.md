@@ -96,7 +96,7 @@ tag class + target stacks — there is no `AUTOMERGE`/`MULTI_STAGE`/`cloud_multi
 ### GitHub Actions Integration
 
 The tool is designed to run as a GitHub Action via `action.yaml`. It:
-- Downloads the latest release package
+- Installs HIU from the action's own checked-out source at the pinned ref (`$GITHUB_ACTION_PATH`), so `action.yaml` and the Python code always run in lockstep
 - Sets up Python 3.13 environment
 - Configures git with canary branch support
 - Runs the update process with environment variables
