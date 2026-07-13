@@ -26,20 +26,19 @@ from .message_generation import (
     wave_release_search_link,
     manual_release_search_link,
 )
-from .config import CANARY_STACKS, IGNORED_FOLDERS, DEV_STACK_MAPPING, GITHUB_REPO
-from .cloud_detection import get_stack_cloud_provider
+from .config import CANARY_STACKS, IGNORED_FOLDERS, GITHUB_REPO
 
 
 def _is_promoter_managed_standard(config: EnvironmentConfig, plan: UpdatePlan) -> bool:
-    """True iff this run is a promoter-managed `standard` 2-wave release (ST-4126):
-    an explicit DEPLOY_STRATEGY=standard (`config.promoter_managed_standard`, AUTOMERGE
-    ignored) AND a `PRODUCTION` deploy. ONLY production is staged — a `dev-*` tag (DEV),
-    CANARY, and OVERRIDE are orthogonal UpdateStrategy axes that keep their own handling
-    and are NEVER promoter-managed (a dev push must stay a fast auto-merged deploy, not an
-    unmerged wave PR the promoter has to merge — Halama review). Keeping this gate in ONE
-    place stops the grouping and the manifest/idempotency-guard wiring from diverging."""
+    """True iff this run is the promoter-managed `standard` 2-wave release (ST-4126):
+    DEPLOY_STRATEGY resolves to standard -- which since ST-4159 includes the EMPTY
+    default -- AND a `PRODUCTION` deploy. ONLY production is staged: a `dev-*` tag (DEV),
+    CANARY, and OVERRIDE are orthogonal UpdateStrategy axes that keep their own single-PR
+    handling and are NEVER promoter-managed (a dev push must stay a fast auto-merged
+    deploy, not an unmerged wave PR the promoter has to merge -- Halama review). Keeping
+    this gate in ONE place stops the grouping and the manifest/guard wiring from diverging."""
     return (
-        getattr(config, "promoter_managed_standard", False)
+        config.deploy_strategy == DeployStrategy.STANDARD
         and plan.strategy == UpdateStrategy.PRODUCTION
     )
 
@@ -87,7 +86,6 @@ def prepare_plan(config: EnvironmentConfig, io_layer: IOLayer) -> UpdatePlan:
         image_tag=config.image_tag,
         extra_tags=config.extra_tags,
         dry_run=config.dry_run,
-        multi_stage=config.multi_stage,
         override_stack=config.override_stack,
         metadata=config.metadata,
     )
@@ -497,79 +495,23 @@ def _group_changes_for_prs(
             'pr_type': 'canary'
         }]
     
-    if plan.multi_stage and plan.strategy == UpdateStrategy.PRODUCTION:
-        print("🔄 Multi-stage deployment detected - grouping by cloud and dev/prod")
-        # Multi-cloud multi-stage: group by (dev/prod) × (aws/azure/gcp)
-        # Creates up to 6 PRs (3 dev + 3 prod)
-        cloud_groups = {
-            "aws": {"dev": [], "prod": []}, 
-            "azure": {"dev": [], "prod": []}, 
-            "gcp": {"dev": [], "prod": []}
-        }
-        
-        # Group changes by cloud and dev/prod
-        print(f"📋 Analyzing {len(stack_changes)} stack changes:")
-        for sc in stack_changes:
-            stack = sc['stack']
-            cloud = get_stack_cloud_provider(stack, io_layer)
-            is_dev = stack in DEV_STACK_MAPPING.values()
-            
-            category = 'dev' if is_dev else 'prod'
-            cloud_groups[cloud][category].append(sc)
-            print(f"  - {stack} → {cloud} {category}")
-        
-        # Create PR plans for each non-empty (cloud, category) combination
-        # Production PRs first, then dev PRs to prevent race condition
-        groups = []
-        print("\n🎯 Creating PR groups (prod first, then dev):")
-        for category in ["prod", "dev"]:
-            for cloud in ["aws", "azure", "gcp"]:
-                changes = cloud_groups[cloud][category]
-                if changes:  # Only create PR if there are changes
-                    stacks = [sc['stack'] for sc in changes]
-                    pr_type = f'multi_stage_{category}'
-                    print(f"  - {cloud} {category}: {len(changes)} changes in stacks {stacks} (pr_type: {pr_type})")
-                    groups.append({
-                        'stacks': stacks,
-                        'changes': changes,
-                        'base_branch': 'main',
-                        'pr_type': pr_type,
-                        'cloud_provider': cloud
-                    })
-        
-        print(f"📊 Total PR groups created: {len(groups)}")
-        return groups
-    
-    # Default: one PR per stack or all in one
-    if len(stack_changes) == 1 or plan.strategy in (UpdateStrategy.DEV, UpdateStrategy.OVERRIDE):
-        # Single stack or dev or override: one PR
-        return [{
-            'stacks': [sc['stack'] for sc in stack_changes],
-            'changes': stack_changes,
-            'base_branch': 'main',
-            'pr_type': 'standard'
-        }]
+    # PRODUCTION is unreachable here by construction (standard 2-wave is the ST-4159
+    # default; wave / manual-per-stack are explicit) -- guard so no future regression
+    # can ever route a production deploy into an auto-mergeable single PR.
+    if plan.strategy == UpdateStrategy.PRODUCTION:
+        raise RuntimeError(
+            "PRODUCTION deploys must be promoter-managed "
+            "(standard/gradual/critical/critical-manual-gate/manual-per-stack); "
+            "the legacy grouping was removed in ST-4159."
+        )
 
-    # Production without multi-stage: based on automerge
-    if config.automerge:
-        # One PR for all
-        return [{
-            'stacks': [sc['stack'] for sc in stack_changes],
-            'changes': stack_changes,
-            'base_branch': 'main',
-            'pr_type': 'standard'
-        }]
-    else:
-        # One PR per stack
-        return [
-            {
-                'stacks': [sc['stack']],
-                'changes': [sc],
-                'base_branch': 'main',
-                'pr_type': 'standard'
-            }
-            for sc in stack_changes
-        ]
+    # DEV / OVERRIDE (and any defensive single-change case): one auto-mergeable PR.
+    return [{
+        'stacks': [sc['stack'] for sc in stack_changes],
+        'changes': stack_changes,
+        'base_branch': 'main',
+        'pr_type': 'standard'
+    }]
 
 
 def _build_manifest_context(plan: UpdatePlan) -> Dict[str, Any]:
@@ -723,14 +665,8 @@ def _create_pr_plan(pr_group: Dict[str, Any], plan: UpdatePlan, config: Environm
     
     # Create descriptive but short branch name based on PR type
     pr_type = pr_group['pr_type']
-    cloud_provider = pr_group.get('cloud_provider', '')
-    
-    if pr_type.startswith('multi_stage_'):
-        # Multi-stage: dummy-service-prod-sync-gcp-production-tag-abc1
-        stage = pr_type.replace('multi_stage_', '')  # 'dev' or 'prod'
-        cloud_suffix = f"-{cloud_provider}" if cloud_provider else ""
-        branch_name = f"{plan.helm_chart}-{stage}-sync{cloud_suffix}-{plan.image_tag}-{suffix}"
-    elif pr_type == 'canary':
+
+    if pr_type == 'canary':
         # Canary: dummy-service-canary-canary-tag-abc1
         branch_name = f"{plan.helm_chart}-canary-{plan.image_tag}-{suffix}"
     elif pr_type == 'wave':
@@ -773,10 +709,7 @@ def _create_pr_plan(pr_group: Dict[str, Any], plan: UpdatePlan, config: Environm
     else:
         pr_title_prefix = generate_pr_title_prefix(
             strategy=plan.strategy,
-            is_multi_stage=plan.multi_stage,
-            user_requested_automerge=config.automerge,
             target_stacks=pr_group['stacks'],
-            cloud_provider=pr_group.get('cloud_provider')
         )
         pr_title = generate_pr_title(
             pr_title_prefix=pr_title_prefix,
