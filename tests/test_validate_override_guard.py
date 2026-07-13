@@ -1,5 +1,6 @@
-"""validate() guard (ST-4169): a PRODUCTION override stack rejects dev-/canary- tags,
-including via extra tags. Non-production override targets (e.g. e2e) stay unrestricted."""
+"""validate() guard (ST-4169): a PRODUCTION override stack rejects any non-production
+tag -- dev-/canary- and unrecognized/`pr-test-*` (INVALID) -- including via extra tags.
+Non-production override targets (e.g. e2e) stay unrestricted."""
 
 from helm_image_updater.environment import EnvironmentConfig
 
@@ -25,6 +26,15 @@ def test_dev_extra_tag_blocked_on_prod_override(tmp_path, monkeypatch):
         override_stack="prod-stack",
         extra_tags=[{"path": "a.tag", "value": "dev-xyz"}],
     )
+    assert any("non-production" in e for e in cfg.validate())
+
+
+def test_pr_test_invalid_tag_blocked_on_prod_override(tmp_path, monkeypatch):
+    # Tag-format validation is skipped in override mode, so a pr-test-* (INVALID) tag
+    # reaches the guard; a production override target must still reject it (Copilot #43).
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "prod-stack").mkdir()
+    cfg = _cfg(image_tag="pr-test-7786-abc", override_stack="prod-stack")
     assert any("non-production" in e for e in cfg.validate())
 
 
