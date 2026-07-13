@@ -18,7 +18,6 @@ class DeployStrategy(Enum):
     """Deploy strategy (the DEPLOY_STRATEGY knob). Values double as the `deploy:*`
     label value for promoter-managed (wave) strategies."""
     STANDARD = "standard"
-    CLOUD_MULTI_STAGE = "cloud_multi_stage"
     GRADUAL = "gradual"
     CRITICAL = "critical"
     CRITICAL_MANUAL_GATE = "critical-manual-gate"
@@ -39,17 +38,16 @@ class DeployStrategy(Enum):
 
     @property
     def is_promoter_managed(self) -> bool:
-        """Strategy-level CAPABILITY: strategies that *can* be promoter-managed (PRs
-        created unmerged, labelled, carrying a manifest). Superset of `is_wave`: also
-        includes STANDARD (ST-4126, 2-wave dev→prod) and MANUAL_PER_STACK (ST-4157,
-        one PR per stack).
+        """Strategy-level CAPABILITY: EVERY strategy is promoter-capable (ST-4159 removed
+        the only non-promoter strategy, cloud_multi_stage). PRs are created unmerged,
+        labelled, carrying a manifest. Superset of `is_wave` (adds STANDARD 2-wave dev→prod
+        and MANUAL_PER_STACK one-PR-per-stack).
 
         NOTE: this is about the STRATEGY, not a given run. Whether a specific run is
-        actually promoter-managed depends on more than the strategy — for STANDARD it
-        also needs `EnvironmentConfig.promoter_managed_standard` (an explicit
-        DEPLOY_STRATEGY=standard) AND a PRODUCTION/DEV deploy. Do NOT use this predicate
-        as the run-time gate: it is True for STANDARD even for a legacy default single-PR
-        deploy. The run-time condition lives in `plan_builder._is_promoter_managed_standard`."""
+        actually promoter-managed is gated at the PLAN level, not the strategy level: only
+        a PRODUCTION deploy is staged — DEV/CANARY/OVERRIDE runs keep their own single-PR
+        auto-merged handling. The run-time condition lives in
+        `plan_builder._is_promoter_managed_standard` / `_is_promoter_managed_manual_per_stack`."""
         return self.is_wave or self in (DeployStrategy.STANDARD, DeployStrategy.MANUAL_PER_STACK)
 
 
@@ -107,7 +105,6 @@ class UpdatePlan:
     
     # Metadata
     dry_run: bool = False
-    multi_stage: bool = False
     override_stack: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
     manifest_context: Optional[Dict[str, Any]] = None  # {app, instance_id, display_name, source_sha, source_pr}; wave mode only
