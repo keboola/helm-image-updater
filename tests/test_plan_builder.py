@@ -74,9 +74,7 @@ def test_plan_with_dry_run(test_stacks):
         "HELM_CHART": "test-chart",
         "IMAGE_TAG": "dev-1.2.3",
         "GH_TOKEN": "fake-token",
-        "AUTOMERGE": "true",
         "DRY_RUN": "true",  # Dry run to avoid actual Git operations
-        "MULTI_STAGE": "false",
         "TARGET_PATH": str(test_stacks["base_dir"]),
         "GH_APPROVE_TOKEN": "fake-approve-token",
     }
@@ -161,145 +159,22 @@ def test_extra_tags_calculation(test_stacks):
 
 
 # Multi-cloud grouping tests
-def test_multi_cloud_multi_stage_grouping_production_tag(test_stacks):
-    """Test multi-cloud multi-stage grouping logic for production tags."""
-    from helm_image_updater.plan_builder import _group_changes_for_prs
-    
-    os.chdir(test_stacks["base_dir"])
-    
-    # Create mock I/O layer that can read shared-values.yaml
-    mock_io_layer = Mock()
-    def mock_shared_values(stack):
-        cloud_mapping = {
-            "dev-keboola-gcp-us-central1": {"cloudProvider": "gcp"},
-            "kbc-testing-azure-east-us-2": {"cloudProvider": "azure"},
-            "dev-keboola-aws-eu-west-1": {"cloudProvider": "aws"},
-            "com-keboola-gcp-prod": {"cloudProvider": "gcp"},
-            "com-keboola-azure-prod": {"cloudProvider": "azure"},
-            "com-keboola-aws-prod": {"cloudProvider": "aws"},
-        }
-        return cloud_mapping.get(stack)
-    mock_io_layer.read_shared_values_yaml.side_effect = mock_shared_values
-
-    # Create mock environment config
-    mock_config = Mock()
-    mock_config.automerge = True
-    from helm_image_updater.models import DeployStrategy
-    mock_config.deploy_strategy = DeployStrategy.STANDARD
-    mock_config.promoter_managed_standard = False
-
-    # Create mock plan
-    mock_plan = Mock()
-    mock_plan.multi_stage = True
-    mock_plan.strategy = UpdateStrategy.PRODUCTION
-    
-    # Create mock stack changes for all 6 stacks
-    stack_changes = []
-    all_stacks = [
-        "dev-keboola-gcp-us-central1", "kbc-testing-azure-east-us-2", "dev-keboola-aws-eu-west-1",
-        "com-keboola-gcp-prod", "com-keboola-azure-prod", "com-keboola-aws-prod"
-    ]
-    
-    for stack in all_stacks:
-        stack_changes.append({
-            'stack': stack,
-            'file_change': Mock(),
-            'changes': []
-        })
-    
-    # Test the grouping
-    groups = _group_changes_for_prs(stack_changes, mock_plan, mock_config, mock_io_layer)
-    
-    # Verify 6 groups were created (3 dev + 3 prod)
-    assert len(groups) == 6, f"Expected 6 groups, got {len(groups)}"
-    
-    # Verify each group has correct properties
-    dev_groups = [g for g in groups if g['pr_type'] == 'multi_stage_dev']
-    prod_groups = [g for g in groups if g['pr_type'] == 'multi_stage_prod']
-    
-    assert len(dev_groups) == 3, f"Expected 3 dev groups, got {len(dev_groups)}"
-    assert len(prod_groups) == 3, f"Expected 3 prod groups, got {len(prod_groups)}"
-    
-    # Verify cloud providers are correctly assigned
-    dev_clouds = {g['cloud_provider'] for g in dev_groups}
-    prod_clouds = {g['cloud_provider'] for g in prod_groups}
-    
-    expected_clouds = {"aws", "azure", "gcp"}
-    assert dev_clouds == expected_clouds, f"Dev clouds {dev_clouds} != expected {expected_clouds}"
-    assert prod_clouds == expected_clouds, f"Prod clouds {prod_clouds} != expected {expected_clouds}"
-    
-    # Verify each group has exactly one stack (one per cloud)
-    for group in groups:
-        assert len(group['stacks']) == 1, f"Each group should have exactly 1 stack, got {len(group['stacks'])}"
-        assert len(group['changes']) == 1, f"Each group should have exactly 1 change, got {len(group['changes'])}"
-        assert group['base_branch'] == 'main', f"All groups should target main branch"
-
-
-def test_multi_cloud_grouping_non_multi_stage(test_stacks):
-    """Test that non-multi-stage deployments still work correctly."""
-    from helm_image_updater.plan_builder import _group_changes_for_prs
-    
-    os.chdir(test_stacks["base_dir"])
-    
-    # Create mock I/O layer
-    mock_io_layer = Mock()
-    
-    # Create mock environment config
-    mock_config = Mock()
-    mock_config.automerge = True
-    from helm_image_updater.models import DeployStrategy
-    mock_config.deploy_strategy = DeployStrategy.STANDARD
-    mock_config.promoter_managed_standard = False
-
-    # Create mock plan (non-multi-stage)
-    mock_plan = Mock()
-    mock_plan.multi_stage = False  # Non-multi-stage
-    mock_plan.strategy = UpdateStrategy.PRODUCTION
-    
-    # Create mock stack changes for all 6 stacks
-    stack_changes = []
-    all_stacks = [
-        "dev-keboola-gcp-us-central1", "kbc-testing-azure-east-us-2", "dev-keboola-aws-eu-west-1",
-        "com-keboola-gcp-prod", "com-keboola-azure-prod", "com-keboola-aws-prod"
-    ]
-    
-    for stack in all_stacks:
-        stack_changes.append({
-            'stack': stack,
-            'file_change': Mock(),
-            'changes': []
-        })
-    
-    # Test the grouping
-    groups = _group_changes_for_prs(stack_changes, mock_plan, mock_config, mock_io_layer)
-    
-    # Verify only 1 group was created (normal behavior for non-multi-stage)
-    assert len(groups) == 1, f"Non-multi-stage should create 1 group, got {len(groups)}"
-    
-    # Verify the group contains all stacks
-    assert len(groups[0]['stacks']) == 6, f"Group should contain all 6 stacks"
-    assert groups[0]['pr_type'] == 'standard', f"PR type should be 'standard'"
-
-
 def test_multi_cloud_grouping_dev_strategy(test_stacks):
     """Test multi-cloud grouping with dev strategy (should not use multi-stage logic)."""
     from helm_image_updater.plan_builder import _group_changes_for_prs
-    
+
     os.chdir(test_stacks["base_dir"])
-    
+
     # Create mock I/O layer
     mock_io_layer = Mock()
-    
+
     # Create mock environment config
     mock_config = Mock()
-    mock_config.automerge = True
     from helm_image_updater.models import DeployStrategy
     mock_config.deploy_strategy = DeployStrategy.STANDARD
-    mock_config.promoter_managed_standard = False
 
-    # Create mock plan (dev strategy, even with multi_stage=True)
+    # Create mock plan (dev strategy)
     mock_plan = Mock()
-    mock_plan.multi_stage = True
     mock_plan.strategy = UpdateStrategy.DEV  # Dev strategy
     
     # Create mock stack changes for dev stacks only
@@ -316,44 +191,15 @@ def test_multi_cloud_grouping_dev_strategy(test_stacks):
     # Test the grouping
     groups = _group_changes_for_prs(stack_changes, mock_plan, mock_config, mock_io_layer)
     
-    # Verify only 1 group was created (dev strategy doesn't use multi-cloud logic)
-    assert len(groups) == 1, f"Dev strategy should create 1 group regardless of multi-stage, got {len(groups)}"
-    
+    # Verify only 1 group was created (dev strategy uses the single-PR path)
+    assert len(groups) == 1, f"Dev strategy should create 1 group, got {len(groups)}"
+
     # Verify the group contains all dev stacks
     assert len(groups[0]['stacks']) == 3, f"Group should contain all 3 dev stacks"
     assert groups[0]['pr_type'] == 'standard', f"PR type should be 'standard'"
 
 
 # Override removal tests
-
-def test_standard_production_automerge_false_is_one_pr_per_stack():
-    """standard production + automerge=false → ONE PR PER STACK (matches main).
-
-    (automerge=true stays a single PR for all stacks — see
-    test_multi_cloud_grouping_non_multi_stage.)
-    """
-    from helm_image_updater.plan_builder import _group_changes_for_prs
-    from helm_image_updater.models import DeployStrategy
-
-    mock_io_layer = Mock()
-    mock_config = Mock()
-    mock_config.automerge = False
-    mock_config.deploy_strategy = DeployStrategy.STANDARD
-    mock_config.promoter_managed_standard = False
-
-    mock_plan = Mock()
-    mock_plan.multi_stage = False
-    mock_plan.strategy = UpdateStrategy.PRODUCTION
-
-    stacks = ["com-keboola-gcp-prod", "com-keboola-azure-prod", "com-keboola-aws-prod"]
-    stack_changes = [{"stack": s, "file_change": Mock(), "changes": []} for s in stacks]
-
-    groups = _group_changes_for_prs(stack_changes, mock_plan, mock_config, mock_io_layer)
-
-    assert len(groups) == 3, f"expected one PR per stack, got {len(groups)}"
-    assert all(len(g["stacks"]) == 1 for g in groups)
-    assert {g["stacks"][0] for g in groups} == set(stacks)
-    assert all(g["pr_type"] == "standard" for g in groups)
 
 
 class TestCheckAndRemoveOverride:
@@ -504,9 +350,7 @@ class TestOverrideIntegration:
             "HELM_CHART": "test-chart",
             "IMAGE_TAG": "production-new-tag",
             "GH_TOKEN": "fake-token",
-            "AUTOMERGE": "true",
             "DRY_RUN": "true",
-            "MULTI_STAGE": "false",
             "TARGET_PATH": str(tmp_path),
         }
 
@@ -552,9 +396,7 @@ class TestOverrideIntegration:
             "HELM_CHART": "test-chart",
             "IMAGE_TAG": "dev-new-tag",
             "GH_TOKEN": "fake-token",
-            "AUTOMERGE": "true",
             "DRY_RUN": "true",
-            "MULTI_STAGE": "false",
             "TARGET_PATH": str(tmp_path),
         }
 
@@ -588,9 +430,7 @@ class TestOverrideIntegration:
             "HELM_CHART": "test-chart",
             "IMAGE_TAG": "dev-new-tag",
             "GH_TOKEN": "fake-token",
-            "AUTOMERGE": "true",
             "DRY_RUN": "true",
-            "MULTI_STAGE": "false",
             "TARGET_PATH": str(tmp_path),
         }
 

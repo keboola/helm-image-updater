@@ -122,74 +122,17 @@ class TestPRTitleGeneration:
         """Test canary PR title generation."""
         prefix = generate_pr_title_prefix(
             strategy=UpdateStrategy.CANARY,
-            is_multi_stage=False,
-            user_requested_automerge=True,
             target_stacks=["dev-keboola-canary-orion"]
         )
         assert prefix == "[canary sync]"
-        
+
     def test_dev_pr_title(self):
         """Test dev PR title generation."""
         prefix = generate_pr_title_prefix(
             strategy=UpdateStrategy.DEV,
-            is_multi_stage=False,
-            user_requested_automerge=True,
             target_stacks=["dev-keboola-gcp-us-central1"]
         )
         assert prefix == "[test sync]"
-        
-    def test_multi_stage_dev_pr_title(self):
-        """Test multi-stage dev PR title generation."""
-        # With automerge
-        prefix = generate_pr_title_prefix(
-            strategy=UpdateStrategy.DEV,
-            is_multi_stage=True,
-            user_requested_automerge=True,
-            target_stacks=["dev-keboola-gcp-us-central1"]
-        )
-        assert prefix == "[multi-stage] [test sync]"
-        
-        # Without automerge
-        prefix = generate_pr_title_prefix(
-            strategy=UpdateStrategy.DEV,
-            is_multi_stage=True,
-            user_requested_automerge=False,
-            target_stacks=["dev-keboola-gcp-us-central1"]
-        )
-        assert prefix == "[multi-stage] [test sync manual]"
-        
-    def test_multi_cloud_dev_pr_title_with_cloud_provider(self):
-        """Test multi-cloud dev PR title generation with cloud provider."""
-        # With automerge and cloud provider
-        prefix = generate_pr_title_prefix(
-            strategy=UpdateStrategy.DEV,
-            is_multi_stage=True,
-            user_requested_automerge=True,
-            target_stacks=["dev-keboola-gcp-us-central1"],
-            cloud_provider="gcp"
-        )
-        assert prefix == "[multi-stage] [test sync gcp]"
-        
-        # Without automerge and cloud provider
-        prefix = generate_pr_title_prefix(
-            strategy=UpdateStrategy.DEV,
-            is_multi_stage=True,
-            user_requested_automerge=False,
-            target_stacks=["kbc-testing-azure-east-us-2"],
-            cloud_provider="azure"
-        )
-        assert prefix == "[multi-stage] [test sync azure manual]"
-        
-    def test_multi_cloud_prod_pr_title_with_cloud_provider(self):
-        """Test multi-cloud production PR title generation with cloud provider."""
-        prefix = generate_pr_title_prefix(
-            strategy=UpdateStrategy.PRODUCTION,
-            is_multi_stage=True,
-            user_requested_automerge=True,
-            target_stacks=["com-keboola-aws-prod"],
-            cloud_provider="aws"
-        )
-        assert prefix == "[multi-stage] [prod sync aws]"
 
 
 class TestCloudDetection:

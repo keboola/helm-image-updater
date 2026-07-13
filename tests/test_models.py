@@ -9,8 +9,8 @@ def test_is_promoter_managed_includes_wave_strategies_and_standard():
     assert DeployStrategy.CRITICAL_MANUAL_GATE.is_promoter_managed is True
     # STANDARD is promoter-managed too (ST-4126: 2-wave dev→prod when unmerged).
     assert DeployStrategy.STANDARD.is_promoter_managed is True
-    # cloud_multi_stage stays legacy, NOT promoter-managed.
-    assert DeployStrategy.CLOUD_MULTI_STAGE.is_promoter_managed is False
+    # MANUAL_PER_STACK is promoter-managed as well.
+    assert DeployStrategy.MANUAL_PER_STACK.is_promoter_managed is True
 
 
 def test_standard_is_not_is_wave():

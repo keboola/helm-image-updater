@@ -47,17 +47,12 @@ def _stack_change(stack):
 def _manual_config():
     config = Mock()
     config.deploy_strategy = DeployStrategy.MANUAL_PER_STACK
-    config.automerge = False
-    # Mock auto-creates truthy attrs; pin the OTHER promoter gates off so routing
-    # exercises the manual branch (a real manual EnvironmentConfig has these False).
-    config.promoter_managed_standard = False
     return config
 
 
 def _manual_plan():
     plan = Mock()
     plan.strategy = UpdateStrategy.PRODUCTION
-    plan.multi_stage = False
     plan.helm_chart = "dummy-service"
     plan.image_tag = "production-abc123"
     return plan
@@ -231,14 +226,13 @@ def manual_stacks(tmp_path):
     return tmp_path
 
 
-def _manual_env(base_dir, dry_run="true", automerge="false"):
+def _manual_env(base_dir, dry_run="true"):
     return {
         "HELM_CHART": "test-chart",
         "IMAGE_TAG": "production-abc123",
         "GH_TOKEN": "t",
         "GH_APPROVE_TOKEN": "a",
         "DEPLOY_STRATEGY": "manual-per-stack",
-        "AUTOMERGE": automerge,
         "DRY_RUN": dry_run,
         "TARGET_PATH": str(base_dir),
     }
@@ -247,7 +241,6 @@ def _manual_env(base_dir, dry_run="true", automerge="false"):
 def test_env_recognises_manual_per_stack():
     config = EnvironmentConfig.from_env(_manual_env("/tmp"))
     assert config.deploy_strategy == DeployStrategy.MANUAL_PER_STACK
-    assert config.promoter_managed_manual_per_stack is True
     assert config.validate() == []
 
 

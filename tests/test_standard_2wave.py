@@ -1,8 +1,8 @@
-"""ST-4126: promoter-managed `standard` deploy = 2-wave dev→prod release.
+"""ST-4126/ST-4159: promoter-managed `standard` deploy = 2-wave dev→prod release.
 
 Wave 0 = all dev stacks (anchor, carries the manifest), wave 1 = all prod stacks.
-The cloud dimension is collapsed (no per-cloud split). Activation: explicit
-DEPLOY_STRATEGY=standard + automerge=false on a production/semver tag.
+The cloud dimension is collapsed (no per-cloud split). Activation: DEPLOY_STRATEGY
+resolves to standard (empty is the universal default, ST-4159) on a PRODUCTION deploy.
 """
 
 import os
@@ -41,15 +41,12 @@ def _stack_change(stack):
 def _std_config():
     config = Mock()
     config.deploy_strategy = DeployStrategy.STANDARD
-    config.automerge = False
-    config.promoter_managed_standard = True
     return config
 
 
 def _std_plan():
     plan = Mock()
     plan.strategy = UpdateStrategy.PRODUCTION
-    plan.multi_stage = False
     plan.helm_chart = "dummy-service"
     plan.image_tag = "production-abc123"
     return plan
@@ -136,47 +133,19 @@ def test_group_changes_for_prs_routes_explicit_standard_unmerged_to_2wave():
     assert by_wave[0]["labels"] == ["release:wave:0", "deploy:standard"]
 
 
-def test_group_changes_for_prs_legacy_default_standard_automerge_unchanged():
-    # Default standard + automerge=true (production tag, multiple stacks) → ONE legacy PR,
-    # NOT the 2-wave promoter path.
-    config = Mock()
-    config.deploy_strategy = DeployStrategy.STANDARD
-    config.automerge = True
-    config.promoter_managed_standard = False  # default standard, not opted in
-    plan = _std_plan()
-    changes = [_stack_change(s) for s in PROD_STACKS]
-
-    groups = _group_changes_for_prs(changes, plan, config, Mock())
-    assert len(groups) == 1
-    assert groups[0]["pr_type"] == "standard"
-    assert groups[0].get("wave_number") is None
-    assert groups[0].get("labels", []) == []
-
-
-def test_group_changes_for_prs_legacy_standard_automerge_false_per_stack_unchanged():
-    # Default standard + automerge=false on a multi-stack production deploy → one PR
-    # per stack (legacy), NOT a 2-wave release. Gated off because deploy_strategy is the
-    # DEFAULT (no explicit standard signal) — see plan_builder routing.
-    config = Mock()
-    config.deploy_strategy = DeployStrategy.STANDARD
-    config.automerge = False
-    config.promoter_managed_standard = False  # not explicitly opted in
-    plan = _std_plan()
-    changes = [_stack_change(s) for s in PROD_STACKS]
-
-    groups = _group_changes_for_prs(changes, plan, config, Mock())
-    # Legacy per-stack PRs: one per stack, no wave labels.
-    assert len(groups) == len(PROD_STACKS)
-    for g in groups:
-        assert g["pr_type"] == "standard"
-        assert g.get("wave_number") is None
+# NOTE (ST-4159): the two "legacy default standard" grouping tests were removed. There is
+# no legacy production grouping anymore — a PRODUCTION deploy with DEPLOY_STRATEGY resolving
+# to standard (empty included) is ALWAYS the 2-wave promoter release; a production deploy can
+# never fall through to the single-PR / per-stack tail (plan_builder raises if it does). The
+# empty-strategy-is-promoter-standard invariant is asserted by
+# test_empty_strategy_production_is_promoter_standard below.
 
 
 def test_group_changes_for_prs_override_not_hijacked_by_standard():
     # ST-4126 routing guard: explicit standard + automerge=false but an OVERRIDE
     # deploy must stay the override single-PR — the 2-wave standard path is for
     # full PRODUCTION/DEV deploys only, never override.
-    config = _std_config()  # promoter_managed_standard=True
+    config = _std_config()  # deploy_strategy=STANDARD
     plan = _std_plan()
     plan.strategy = UpdateStrategy.OVERRIDE
     changes = [_stack_change("kbc-us-east-1")]
@@ -257,7 +226,7 @@ def test_prepare_plan_standard_sets_manifest_context_and_two_waves(std_stacks):
     }
     config = EnvironmentConfig.from_env(env)
     assert config.validate() == []
-    assert config.promoter_managed_standard is True
+    assert config.deploy_strategy == DeployStrategy.STANDARD
 
     plan = prepare_plan(config, _io_layer())
 
@@ -276,11 +245,11 @@ def test_prepare_plan_standard_sets_manifest_context_and_two_waves(std_stacks):
     assert by_wave[1].labels == ["release:wave:1", "deploy:standard"]
 
 
-def test_prepare_plan_explicit_standard_ignores_automerge_true(std_stacks):
-    # ST-4126: AUTOMERGE is IGNORED for an EXPLICIT DEPLOY_STRATEGY=standard (same as the
-    # wave strategies). AUTOMERGE=true must NOT revert it to a legacy single-PR deploy — it
-    # still emits the promoter-managed 2-wave release with unmerged wave PRs (which HIU
-    # auto-approves because auto_merge=False, so release-promoter can merge them).
+def test_prepare_plan_stray_automerge_true_still_two_waves(std_stacks):
+    # ST-4159: AUTOMERGE is a dead env var, but an old dispatcher may still send it. A stray
+    # AUTOMERGE=true must NOT revert a production standard deploy to a single merged PR — it
+    # is ignored, and the promoter-managed 2-wave release is emitted unchanged (unmerged wave
+    # PRs that HIU auto-approves so release-promoter can merge them).
     os.chdir(std_stacks["base_dir"])
     env = {
         "HELM_CHART": "test-chart",
@@ -288,12 +257,12 @@ def test_prepare_plan_explicit_standard_ignores_automerge_true(std_stacks):
         "GH_TOKEN": "t",
         "GH_APPROVE_TOKEN": "a",
         "DEPLOY_STRATEGY": "standard",
-        "AUTOMERGE": "true",  # explicitly true — must be ignored for explicit standard
+        "AUTOMERGE": "true",  # dead knob — must be ignored
         "DRY_RUN": "true",
         "TARGET_PATH": str(std_stacks["base_dir"]),
     }
     config = EnvironmentConfig.from_env(env)
-    assert config.promoter_managed_standard is True
+    assert not hasattr(config, "automerge")
 
     plan = prepare_plan(config, _io_layer())
     assert plan.manifest_context is not None
@@ -321,7 +290,7 @@ def test_prepare_plan_standard_invokes_idempotency_guard(std_stacks):
         ).decode(),
     }
     config = EnvironmentConfig.from_env(env)
-    assert config.promoter_managed_standard is True
+    assert config.deploy_strategy == DeployStrategy.STANDARD
 
     from helm_image_updater.manifest import build_manifest, manifest_block, compute_instance_id
 
@@ -338,27 +307,45 @@ def test_prepare_plan_standard_invokes_idempotency_guard(std_stacks):
         prepare_plan(config, io)
 
 
-def test_prepare_plan_legacy_standard_no_manifest_context(std_stacks):
-    # Default (empty) standard + automerge=true → legacy single PR, NO manifest context.
+def test_empty_strategy_production_is_promoter_standard(std_stacks):
+    # ST-4159: the empty-strategy default IS promoter standard. A production tag with NO
+    # DEPLOY_STRATEGY now produces the promoter-managed 2-wave release (manifest + unmerged
+    # wave PRs), NOT the old legacy single merged PR.
     os.chdir(std_stacks["base_dir"])
     env = {
         "HELM_CHART": "test-chart",
         "IMAGE_TAG": "production-abc123",
         "GH_TOKEN": "t",
         "GH_APPROVE_TOKEN": "a",
-        "DEPLOY_STRATEGY": "",
-        "AUTOMERGE": "true",
+        # DEPLOY_STRATEGY unset -> resolves to standard
         "DRY_RUN": "true",
         "TARGET_PATH": str(std_stacks["base_dir"]),
     }
     config = EnvironmentConfig.from_env(env)
-    assert config.promoter_managed_standard is False
+    assert config.deploy_strategy == DeployStrategy.STANDARD
 
     plan = prepare_plan(config, _io_layer())
-    assert plan.manifest_context is None
-    # legacy single PR for all stacks
-    assert len(plan.pr_plans) == 1
-    assert plan.pr_plans[0].wave_number is None
+    assert plan.strategy == UpdateStrategy.PRODUCTION
+    assert plan.manifest_context is not None
+    assert len(plan.pr_plans) == 2
+    by_wave = {p.wave_number: p for p in plan.pr_plans}
+    assert set(by_wave) == {0, 1}
+    assert by_wave[0].auto_merge is False
+    assert by_wave[1].auto_merge is False
+
+
+def test_override_stack_never_promoter_standard(std_stacks):
+    # ST-4159 invariant (unit level): OVERRIDE wins in _determine_strategy, so an
+    # override deploy is never the promoter-managed 2-wave path regardless of strategy.
+    from helm_image_updater.plan_builder import _is_promoter_managed_standard
+    cfg = EnvironmentConfig.from_env({
+        "HELM_CHART": "dummy-service", "IMAGE_TAG": "production-abc",
+        "OVERRIDE_STACK": "kbc-us-east-1",
+        "GH_TOKEN": "t", "GH_APPROVE_TOKEN": "a",
+    })
+    plan = Mock()
+    plan.strategy = UpdateStrategy.OVERRIDE
+    assert _is_promoter_managed_standard(cfg, plan) is False
 
 
 def test_prepare_plan_explicit_standard_override_stack_not_managed(std_stacks):
