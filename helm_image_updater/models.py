@@ -107,7 +107,7 @@ class UpdatePlan:
     dry_run: bool = False
     override_stack: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
-    manifest_context: Optional[Dict[str, Any]] = None  # {app, instance_id, display_name, source_sha, source_pr}; wave mode only
+    manifest_context: Optional[Dict[str, Any]] = None  # {app, instance_id, display_name, source_sha, source_pr, source_pr_author}; wave mode only
 
     def has_changes(self) -> bool:
         """Check if there are any changes to make."""

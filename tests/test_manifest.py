@@ -3,8 +3,8 @@ import json
 import re
 import pytest
 from helm_image_updater.manifest import (
-    compute_instance_id, build_manifest, manifest_block, extract_instance_id,
-    is_manifest_v1, MANIFEST_HEADING,
+    compute_instance_id, build_manifest, build_manual_manifest, manifest_block,
+    extract_instance_id, is_manifest_v1, MANIFEST_HEADING,
 )
 
 # Mirror the promoter's regexes with exact-JS semantics.
@@ -121,6 +121,32 @@ def test_build_manifest_shape():
 def test_build_manifest_omits_absent_optional_source_fields():
     m = build_manifest(app="a", instance_id="a-1", display_name="d", waves={0: 1})
     assert "sourceSha" not in m and "sourcePr" not in m
+
+
+def test_build_manifest_includes_source_pr_author():
+    m = build_manifest(app="a", instance_id="a-1", display_name="a@1",
+                       waves={0: 10}, source_pr="https://github.com/keboola/x/pull/1",
+                       source_pr_author="vojtabiberle")
+    assert m["sourcePrAuthor"] == "vojtabiberle"
+
+
+def test_build_manifest_omits_source_pr_author_when_absent():
+    m = build_manifest(app="a", instance_id="a-1", display_name="a@1", waves={0: 10})
+    assert "sourcePrAuthor" not in m
+
+
+def test_build_manual_manifest_includes_source_pr_author():
+    m = build_manual_manifest(app="a", instance_id="a-1", display_name="a@1",
+                              members=[10, 11], source_pr_author="odinuv")
+    assert m["sourcePrAuthor"] == "odinuv"
+
+
+def test_is_manifest_v1_accepts_and_rejects_source_pr_author():
+    base = build_manifest(app="a", instance_id="a-1", display_name="a@1", waves={0: 10})
+    ok = dict(base, sourcePrAuthor="odinuv")
+    bad = dict(base, sourcePrAuthor=42)
+    assert is_manifest_v1(ok) is True
+    assert is_manifest_v1(bad) is False
 
 
 def test_manifest_block_is_extractable_by_promoter_regex():
@@ -293,3 +319,6 @@ class TestIsManifestV1:
 
     def test_rejects_source_pr_int(self):
         assert is_manifest_v1(_valid_manifest(sourcePr=5)) is False
+
+    def test_rejects_source_pr_author_int(self):
+        assert is_manifest_v1(_valid_manifest(sourcePrAuthor=5)) is False

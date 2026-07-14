@@ -225,6 +225,7 @@ def _patch_anchor_manifest(plan: UpdatePlan, io_layer: IOLayer, wave_pr_numbers:
     manifest = build_manifest(
         app=ctx["app"], instance_id=ctx["instance_id"], display_name=ctx["display_name"],
         waves=wave_pr_numbers, source_sha=ctx.get("source_sha"), source_pr=ctx.get("source_pr"),
+        source_pr_author=ctx.get("source_pr_author"),
     )
     links_md = _wave_links_md(wave_pr_numbers)
     new_body = f"{wave0_body}\n\n{links_md}\n\n{manifest_block(manifest)}"
@@ -313,6 +314,7 @@ def _patch_manual_anchor(plan: UpdatePlan, io_layer: IOLayer, manual_pr_numbers:
     manifest = build_manual_manifest(
         app=ctx["app"], instance_id=ctx["instance_id"], display_name=ctx["display_name"],
         members=members, source_sha=ctx.get("source_sha"), source_pr=ctx.get("source_pr"),
+        source_pr_author=ctx.get("source_pr_author"),
     )
     links_md = _manual_members_md(members, anchor)
     new_body = f"{anchor_body}\n\n{links_md}\n\n{manifest_block(manifest)}"
