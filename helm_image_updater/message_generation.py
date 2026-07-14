@@ -58,53 +58,26 @@ def generate_commit_message(
 
 def generate_pr_title_prefix(
     strategy: UpdateStrategy,
-    is_multi_stage: bool,
-    user_requested_automerge: bool,
     target_stacks: List[str],
-    cloud_provider: Optional[str] = None
 ) -> str:
-    """
-    Generate the PR title prefix based on the update context.
-    
-    Pure function that determines PR title prefix.
-    
+    """PR title prefix: `[canary sync]` for canary; `[test sync]` when every target
+    stack is a dev stack; `[prod sync]` otherwise (incl. e2e/override targets, matching
+    the historical titles). Pure function.
+
     Args:
         strategy: The update strategy being used
-        is_multi_stage: Whether this is a multi-stage deployment
-        user_requested_automerge: Original user automerge preference
         target_stacks: List of stacks being updated
-        cloud_provider: Cloud provider for multi-cloud deployment (aws, azure, gcp)
-        
+
     Returns:
         PR title prefix string
     """
-    # Canary updates always use canary sync
     if strategy == UpdateStrategy.CANARY:
         return "[canary sync]"
-    
-    # Determine if this is a dev or production update
-    is_dev_update = False
-    if target_stacks:
-        classifications = [classify_stack(stack) for stack in target_stacks]
-        is_dev_update = all(c.is_dev for c in classifications)
-    
-    # Multi-stage mode has special prefixes
-    if is_multi_stage:
-        # Build cloud suffix
-        cloud_suffix = f" {cloud_provider}" if cloud_provider else ""
-        
-        if is_dev_update:
-            merge_suffix = "" if user_requested_automerge else " manual"
-            return f"[multi-stage] [test sync{cloud_suffix}{merge_suffix}]"
-        else:
-            # Production PRs never auto-merge in multi-stage, so no "manual" needed for requested automerge
-            return f"[multi-stage] [prod sync{cloud_suffix}]"
-    
-    # Regular mode
-    if is_dev_update:
-        return "[test sync]"
-    else:
-        return "[prod sync]"
+
+    is_dev_update = bool(target_stacks) and all(
+        classify_stack(stack).is_dev for stack in target_stacks
+    )
+    return "[test sync]" if is_dev_update else "[prod sync]"
 
 
 def build_tag_string(

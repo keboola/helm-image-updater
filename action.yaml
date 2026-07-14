@@ -7,20 +7,12 @@ inputs:
   image-tag:
     description: 'Updates image.tag in tag.yaml'
     required: true
-  automerge:
-    description: 'Automatically merge PRs'
-    required: false
-    default: 'true'
   dry-run:
     description: 'Do a dry run'
     required: false
     default: 'false'
-  multi-stage:
-    description: 'Enable multi-stage deployment'
-    required: false
-    default: 'false'
   deploy-strategy:
-    description: 'Promoter deploy strategy: standard | cloud_multi_stage | gradual | critical | critical-manual-gate'
+    description: 'Promoter deploy strategy: standard | gradual | critical | critical-manual-gate | manual-per-stack (empty = standard). Production deploys are always promoter-managed; auto-merge is decided by tag class + target stacks.'
     required: false
     default: ''
   commit-sha:
@@ -44,7 +36,7 @@ inputs:
     required: false
     default: ''
   approve-token:
-    description: 'GitHub token from a machine user (CODEOWNERS team member) to auto-approve PRs when automerge is false'
+    description: 'GitHub token from a machine user (CODEOWNERS team member) to auto-approve the unmerged PRs so release-promoter (or a human) can merge them'
     required: true
   github-token:
     description: 'GitHub token for authentication'
@@ -84,9 +76,7 @@ runs:
       env:
         HELM_CHART: ${{ inputs.helm-chart }}
         IMAGE_TAG: ${{ inputs.image-tag }}
-        AUTOMERGE: ${{ inputs.automerge }}
         DRY_RUN: ${{ inputs.dry-run }}
-        MULTI_STAGE: ${{ inputs.multi-stage }}
         DEPLOY_STRATEGY: ${{ inputs.deploy-strategy }}
         EXTRA_TAG1: ${{ inputs.extra-tag1 }}
         EXTRA_TAG2: ${{ inputs.extra-tag2 }}

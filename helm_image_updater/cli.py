@@ -40,10 +40,9 @@ def main():
             print("Extra tags to update:")
             for tag in config.extra_tags:
                 print(f"  - {tag['path']}: {tag['value']}")
-        print(f"Automerge: {config.automerge}")
+        print(f"Deploy strategy: {config.deploy_strategy.value}")
         print(f"Dry run: {config.dry_run}")
-        print(f"Multi-stage deployment: {config.multi_stage}")
-        
+
         # Handle target path change
         if config.target_path != ".":
             print(f"Changing to target directory: {config.target_path}")

@@ -176,7 +176,7 @@ def test_cli_environment_variables(cli_test_env, capsys):
     # Set environment variables
     os.environ["HELM_CHART"] = "test-chart"
     os.environ["IMAGE_TAG"] = "dev-1.2.3"
-    os.environ["AUTOMERGE"] = "false"
+    os.environ["AUTOMERGE"] = "false"  # dead knob (ST-4159) — set to prove HIU ignores it
     os.environ["DRY_RUN"] = "true"
 
     # Run CLI
@@ -186,7 +186,9 @@ def test_cli_environment_variables(cli_test_env, capsys):
     captured = capsys.readouterr()
     assert "Processing Helm chart: test-chart" in captured.out
     assert "New image tag: dev-1.2.3" in captured.out
-    assert "Automerge: False" in captured.out
+    # ST-4159: the CLI prints the resolved deploy strategy (empty -> standard); the
+    # legacy "Automerge:"/"Multi-stage deployment:" lines are gone (AUTOMERGE is ignored).
+    assert "Deploy strategy: standard" in captured.out
     assert "Dry run: True" in captured.out
 
 
@@ -208,7 +210,6 @@ def test_dev_tag_update(cli_test_env, mock_git_operations, capsys):
     # Set environment variables for dev tag update
     os.environ["HELM_CHART"] = "test-chart"
     os.environ["IMAGE_TAG"] = "dev-1.2.3"
-    os.environ["AUTOMERGE"] = "true"
 
     # Track PR creation calls
     created_prs = []
@@ -265,73 +266,12 @@ def test_dev_tag_update(cli_test_env, mock_git_operations, capsys):
     assert "test-chart" in created_prs[0]["title"]
 
 
-def test_production_tag_update(cli_test_env, mock_git_operations, capsys):
-    """Test updating all stacks with a production tag.
-
-    This test verifies that:
-    1. All stacks are updated with production tags
-    2. The tag.yaml files are correctly modified
-    3. Console output correctly reports the updates
-    4. Git operations are performed correctly
-    """
-    base_dir, mock_repo, mock_github_repo = cli_test_env
-
-    # Set environment variables for production tag update
-    os.environ["HELM_CHART"] = "test-chart"
-    os.environ["IMAGE_TAG"] = "production-1.2.3"
-    os.environ["AUTOMERGE"] = "true"
-
-    # Track PR creation calls
-    created_prs = []
-
-    def track_pr_creation(*args, **kwargs):
-        """Track GitHub PR creation details."""
-        # Extract arguments (self, title, body, branch_name, base_branch="main", auto_merge=False)
-        if len(args) >= 4:
-            title, body, branch_name = args[1], args[2], args[3]
-            base_branch = args[4] if len(args) > 4 else kwargs.get("base_branch", "main")
-        else:
-            title = kwargs.get("title", "Unknown")
-            body = kwargs.get("body", "")
-            branch_name = kwargs.get("branch_name", "unknown-branch")
-            base_branch = kwargs.get("base_branch", "main")
-        
-        created_prs.append({"branch": branch_name, "title": title, "base": base_branch})
-        print(f"Created PR: {title} (branch: {branch_name}, base: {base_branch})")
-        return "https://github.com/mock-org/mock-repo/pull/123"
-
-    # Customize the PR creation mock to track calls
-    mock_git_operations['create_pull_request'].side_effect = track_pr_creation
-    
-    # Run CLI - files will be written, Git/GitHub operations mocked
-    cli.main()
-
-    # Check console output
-    captured = capsys.readouterr()
-    assert "Processing Helm chart: test-chart" in captured.out
-    assert "Updating all stacks (production- tag)" in captured.out
-    assert "New image tag:" in captured.out
-
-    # Verify tag.yaml was updated in both dev and prod stacks
-    dev_tag_yaml = read_tag_yaml(
-        base_dir / "dev-keboola-gcp-us-central1" / "test-chart" / "tag.yaml"
-    )
-    assert dev_tag_yaml["image"]["tag"] == "production-1.2.3"
-
-    prod_tag_yaml = read_tag_yaml(
-        base_dir / "com-keboola-gcp-prod" / "test-chart" / "tag.yaml"
-    )
-    assert prod_tag_yaml["image"]["tag"] == "production-1.2.3"
-
-    # Verify Git operations were performed
-    assert mock_git_operations['checkout_branch'].called, "git checkout should be called"
-    assert mock_git_operations['add_files'].called, "git add should be called"
-    assert mock_git_operations['commit'].called, "git commit should be called"
-    assert mock_git_operations['create_pull_request'].called, "create PR should be called"
-
-    # Verify PR was created
-    assert len(created_prs) == 1
-    assert "test-chart" in created_prs[0]["title"]
+# NOTE (ST-4159): the legacy CLI-level production tests (test_production_tag_update,
+# test_happy_path_production_update, test_semver_main_image_tag, and the two
+# test_multi_cloud_multi_stage_* tests) were removed. A production/semver tag is now the
+# promoter-managed `standard` 2-wave release (no single combined PR, no cloud_multi_stage
+# 6-PR grouping); that path is covered by tests/test_standard_2wave.py at the plan level
+# and by the helm-image-updater-testing E2E suite end-to-end. cloud_multi_stage is gone.
 
 
 def test_canary_tag_update(cli_test_env, capsys):
@@ -372,7 +312,6 @@ def test_canary_tag_update(cli_test_env, capsys):
     # Test Case 1: Regular service that exists in multiple environments
     os.environ["HELM_CHART"] = "test-chart"
     os.environ["IMAGE_TAG"] = "canary-orion-1.2.3"
-    os.environ["AUTOMERGE"] = "true"
 
     with patch("helm_image_updater.io_layer.IOLayer.create_branch_commit_and_pr", mock_create_branch_commit_and_pr):
         cli.main()
@@ -423,7 +362,6 @@ def test_canary_tag_update(cli_test_env, capsys):
     os.environ["GH_APPROVE_TOKEN"] = "fake-approve-token"
     os.environ["HELM_CHART"] = "metastore"  # Chart that only exists in canary
     os.environ["IMAGE_TAG"] = "canary-orion-metastore-0.0.5"
-    os.environ["AUTOMERGE"] = "true"
 
     # Create metastore chart only in canary stack (simulating canary-only service)
     metastore_canary_dir = base_dir / "dev-keboola-canary-orion" / "metastore"
@@ -637,12 +575,15 @@ def test_valid_extra_tag_formats(cli_test_env, capsys):
     assert len(created_prs) == 1
     assert "test-chart" in created_prs[0]["title"]
 
-    # Run another test with v-prefixed semver
+    # Run another test with a v-prefixed semver EXTRA tag. The main IMAGE_TAG stays dev-
+    # (ST-4159: a production main tag is now the promoter-managed 2-wave path, exercised by
+    # test_standard_2wave.py, not this single-PR CLI smoke) so we still validate that a
+    # v-prefixed semver EXTRA tag value is accepted end-to-end.
     os.environ.clear()
     os.environ["GH_TOKEN"] = "fake-token"
     os.environ["GH_APPROVE_TOKEN"] = "fake-approve-token"
     os.environ["HELM_CHART"] = "test-chart"
-    os.environ["IMAGE_TAG"] = "production-1.2.3"
+    os.environ["IMAGE_TAG"] = "dev-1.2.3"
     os.environ["EXTRA_TAG1"] = "path1:v1.2.3"  # Semver format with v prefix
 
     created_prs.clear()
@@ -658,7 +599,7 @@ def test_valid_extra_tag_formats(cli_test_env, capsys):
     assert "Extra tags to update:" in captured.out
     assert "  - path1: v1.2.3" in captured.out
 
-    # Verify PR was created (production tag should trigger a PR for all stacks)
+    # Verify PR was created (dev tag -> single dev PR; the v-semver extra tag is accepted)
     assert len(created_prs) == 1
     assert "test-chart" in created_prs[0]["title"]
 
@@ -703,191 +644,6 @@ def test_nonexistent_stack_override(cli_test_env, capsys):
 
     # Verify PR was not created
     assert len(created_prs) == 0
-
-
-def test_multi_cloud_multi_stage_automerge_true(cli_test_env, capsys):
-    """Test multi-cloud multi-stage deployment with automerge=true.
-
-    This test verifies that:
-    1. With multi-stage=true and automerge=true
-    2. For production tags, it creates 6 PRs:
-       - 3 Dev PRs with [multi-stage] [test sync {cloud}] that have automerge=true
-       - 3 Prod PRs with [multi-stage] [prod sync {cloud}] that have automerge=false
-    3. Each cloud (aws, azure, gcp) gets both dev and prod PRs
-    4. The automerge setting for dev stacks is true, prod stacks is false
-    """
-    base_dir, mock_repo, mock_github_repo = cli_test_env
-
-    # Set environment variables for multi-cloud multi-stage deployment
-    os.environ["HELM_CHART"] = "test-chart"
-    os.environ["IMAGE_TAG"] = "production-1.2.3"
-    os.environ["MULTI_STAGE"] = "true"
-    os.environ["AUTOMERGE"] = "true"
-
-    # Track PRs with their automerge setting
-    created_prs = []
-
-    def mock_create_branch_commit_and_pr(self, branch_name, files_to_commit, commit_message, pr_title, pr_body, base_branch="main", auto_merge=False, labels=None):
-        created_prs.append(
-            {
-                "branch": branch_name,
-                "title": pr_title,
-                "base": base_branch,
-                "automerge": auto_merge,
-            }
-        )
-        print(
-            f"Created PR: {pr_title} (branch: {branch_name}, base: {base_branch}, automerge: {auto_merge})"
-        )
-
-    # Mock create_pr but use real config to capture automerge setting
-    with patch("helm_image_updater.io_layer.IOLayer.create_branch_commit_and_pr", mock_create_branch_commit_and_pr):
-        # Run CLI
-        cli.main()
-
-    # Check console output
-    captured = capsys.readouterr()
-    assert "Multi-stage deployment: True" in captured.out
-    assert "Automerge: True" in captured.out
-
-    # Verify 6 PRs were created (3 dev + 3 prod)
-    assert len(created_prs) == 6, f"Should create exactly 6 PRs, got {len(created_prs)}"
-
-    # Debug: Print all PR titles for inspection
-    print("DEBUG: All PR titles:")
-    for pr in created_prs:
-        print(f"  - '{pr['title']}' (automerge: {pr['automerge']})")
-
-    # Find dev and prod PRs by cloud
-    dev_prs = {}
-    prod_prs = {}
-    
-    for pr in created_prs:
-        if "[multi-stage] [test sync" in pr["title"]:
-            # Extract cloud from title like "[multi-stage] [test sync aws]"
-            for cloud in ["aws", "azure", "gcp"]:
-                if f"[test sync {cloud}]" in pr["title"]:
-                    dev_prs[cloud] = pr
-                    break
-        elif "[multi-stage] [prod sync" in pr["title"]:
-            # Extract cloud from title like "[multi-stage] [prod sync aws]"
-            for cloud in ["aws", "azure", "gcp"]:
-                if f"[prod sync {cloud}]" in pr["title"]:
-                    prod_prs[cloud] = pr
-                    break
-
-    # Verify all cloud PRs exist
-    expected_clouds = ["aws", "azure", "gcp"]
-    for cloud in expected_clouds:
-        assert cloud in dev_prs, f"Should create dev PR for {cloud}"
-        assert cloud in prod_prs, f"Should create prod PR for {cloud}"
-
-    # Verify automerge settings for all clouds
-    for cloud in expected_clouds:
-        assert dev_prs[cloud]["automerge"] is True, f"Dev {cloud} PR should have automerge=True"
-        assert prod_prs[cloud]["automerge"] is False, f"Prod {cloud} PR should have automerge=False"
-
-    # Verify PR title patterns
-    for cloud in expected_clouds:
-        assert dev_prs[cloud]["title"].startswith(f"[multi-stage] [test sync {cloud}]"), (
-            f"Dev {cloud} PR should start with [multi-stage] [test sync {cloud}]"
-        )
-        assert prod_prs[cloud]["title"].startswith(f"[multi-stage] [prod sync {cloud}]"), (
-            f"Prod {cloud} PR should start with [multi-stage] [prod sync {cloud}]"
-        )
-
-
-def test_multi_cloud_multi_stage_automerge_false(cli_test_env, capsys):
-    """Test multi-cloud multi-stage deployment with automerge=false.
-
-    This test verifies that:
-    1. With multi-stage=true and automerge=false
-    2. For production tags, it creates 6 PRs:
-       - 3 Dev PRs with [multi-stage] [test sync {cloud} manual] that respect automerge=false
-       - 3 Prod PRs with [multi-stage] [prod sync {cloud}] that are NOT auto-merged
-    3. Each cloud (aws, azure, gcp) gets both dev and prod PRs
-    4. All PRs have automerge=false due to user preference and multi-stage prod rule
-    """
-    base_dir, mock_repo, mock_github_repo = cli_test_env
-
-    # Set environment variables for multi-cloud multi-stage deployment with automerge=false
-    os.environ["HELM_CHART"] = "test-chart"
-    os.environ["IMAGE_TAG"] = "production-1.2.3"
-    os.environ["MULTI_STAGE"] = "true"
-    os.environ["AUTOMERGE"] = "false"
-
-    # Track PRs with their automerge setting
-    created_prs = []
-
-    def mock_create_branch_commit_and_pr(self, branch_name, files_to_commit, commit_message, pr_title, pr_body, base_branch="main", auto_merge=False, labels=None):
-        created_prs.append(
-            {
-                "branch": branch_name,
-                "title": pr_title,
-                "base": base_branch,
-                "automerge": auto_merge,
-            }
-        )
-        print(
-            f"Created PR: {pr_title} (branch: {branch_name}, base: {base_branch}, automerge: {auto_merge})"
-        )
-
-    # Mock create_pr but use real config to capture automerge setting
-    with patch("helm_image_updater.io_layer.IOLayer.create_branch_commit_and_pr", mock_create_branch_commit_and_pr):
-        # Run CLI
-        cli.main()
-
-    # Check console output
-    captured = capsys.readouterr()
-    assert "Multi-stage deployment: True" in captured.out
-    assert "Automerge: False" in captured.out
-
-    # Verify 6 PRs were created (3 dev + 3 prod)
-    assert len(created_prs) == 6, f"Should create exactly 6 PRs, got {len(created_prs)}"
-
-    # Debug: Print all PR titles for inspection
-    print("DEBUG: All PR titles:")
-    for pr in created_prs:
-        print(f"  - '{pr['title']}' (automerge: {pr['automerge']})")
-
-    # Find dev and prod PRs by cloud
-    dev_prs = {}
-    prod_prs = {}
-    
-    for pr in created_prs:
-        if "[multi-stage] [test sync" in pr["title"]:
-            # Extract cloud from title like "[multi-stage] [test sync aws manual]"
-            for cloud in ["aws", "azure", "gcp"]:
-                if f"[test sync {cloud} manual]" in pr["title"]:
-                    dev_prs[cloud] = pr
-                    break
-        elif "[multi-stage] [prod sync" in pr["title"]:
-            # Extract cloud from title like "[multi-stage] [prod sync aws]"
-            for cloud in ["aws", "azure", "gcp"]:
-                if f"[prod sync {cloud}]" in pr["title"]:
-                    prod_prs[cloud] = pr
-                    break
-
-    # Verify all cloud PRs exist
-    expected_clouds = ["aws", "azure", "gcp"]
-    for cloud in expected_clouds:
-        assert cloud in dev_prs, f"Should create dev PR for {cloud}"
-        assert cloud in prod_prs, f"Should create prod PR for {cloud}"
-
-    # Verify automerge settings for all clouds (all should be False)
-    for cloud in expected_clouds:
-        assert dev_prs[cloud]["automerge"] is False, f"Dev {cloud} PR should have automerge=False"
-        assert prod_prs[cloud]["automerge"] is False, f"Prod {cloud} PR should have automerge=False"
-
-    # Verify PR title patterns
-    for cloud in expected_clouds:
-        assert dev_prs[cloud]["title"].startswith(f"[multi-stage] [test sync {cloud} manual]"), (
-            f"Dev {cloud} PR should start with [multi-stage] [test sync {cloud} manual]"
-        )
-        assert prod_prs[cloud]["title"].startswith(f"[multi-stage] [prod sync {cloud}]"), (
-            f"Prod {cloud} PR should start with [multi-stage] [prod sync {cloud}]"
-        )
-
 
 
 def test_dry_run(cli_test_env, capsys):
@@ -1030,168 +786,6 @@ def test_dev_tag_with_production_override_stack(cli_test_env, capsys):
     assert len(created_prs) == 0
 
 
-def test_happy_path_production_update(cli_test_env, mock_git_operations, capsys):
-    """Test the most common happy path - production tag with automerge.
-
-    This test verifies the complete flow for the most common production scenario:
-    1. Production tag is applied to all stacks
-    2. Automerge is enabled (default)
-    3. Dry run is disabled (default)
-    4. Git operations are performed correctly
-    5. PR is created and auto-merged
-    """
-    base_dir, mock_repo, mock_github_repo = cli_test_env
-
-    # Set environment variables for production update
-    os.environ["HELM_CHART"] = "test-chart"
-    os.environ["IMAGE_TAG"] = "production-2.0.0"
-    os.environ["AUTOMERGE"] = "true"  # this is default, but being explicit
-    # DRY_RUN is not set, which defaults to false
-
-    # Track PR creation calls
-    created_prs = []
-
-    def track_pr_creation(*args, **kwargs):
-        """Track GitHub PR creation details."""
-        # Extract arguments (self, title, body, branch_name, base_branch="main", auto_merge=False)
-        if len(args) >= 4:
-            title, body, branch_name = args[1], args[2], args[3]
-            base_branch = args[4] if len(args) > 4 else kwargs.get("base_branch", "main")
-            auto_merge = args[5] if len(args) > 5 else kwargs.get("auto_merge", False)
-        else:
-            title = kwargs.get("title", "Unknown")
-            body = kwargs.get("body", "")
-            branch_name = kwargs.get("branch_name", "unknown-branch")
-            base_branch = kwargs.get("base_branch", "main")
-            auto_merge = kwargs.get("auto_merge", False)
-        
-        created_prs.append({
-            "branch": branch_name,
-            "title": title,
-            "base": base_branch,
-            "automerge": auto_merge,
-        })
-
-        # Simulate the non-dry-run behavior that would occur in create_pr
-        if auto_merge:
-            print(f"Created and auto-merged PR: {title} (branch: {branch_name}, base: {base_branch})")
-        else:
-            print(f"Created PR: {title} (branch: {branch_name}, base: {base_branch})")
-
-        return "https://github.com/mock-org/mock-repo/pull/123"
-
-    # Customize the PR creation mock to track calls
-    mock_git_operations['create_pull_request'].side_effect = track_pr_creation
-    
-    # Run CLI - files will be written, Git/GitHub operations mocked
-    cli.main()
-
-    # Check console output
-    captured = capsys.readouterr()
-    assert "Processing Helm chart: test-chart" in captured.out
-    assert "New image tag: production-2.0.0" in captured.out
-    assert "New image tag:" in captured.out
-
-    # Verify console output shows updates for both dev and prod stacks
-    assert "Updated dev-keboola-gcp-us-central1/test-chart/tag.yaml: image.tag from old-tag to production-2.0.0" in captured.out
-    assert "Updated com-keboola-gcp-prod/test-chart/tag.yaml: image.tag from old-tag to production-2.0.0" in captured.out
-
-    # Verify Git operations were performed
-    assert mock_git_operations['checkout_branch'].called, "git checkout should be called"
-    assert mock_git_operations['add_files'].called, "git add should be called"
-    assert mock_git_operations['commit'].called, "git commit should be called"
-    assert mock_git_operations['create_pull_request'].called, "create PR should be called"
-
-    # Verify our tracking shows PR was created with automerge enabled
-    assert len(created_prs) == 1
-    assert created_prs[0]["automerge"] is True
-    assert "test-chart" in created_prs[0]["title"]
-
-
-def test_semver_main_image_tag(cli_test_env, capsys):
-    """Test that semver formats are accepted for the main IMAGE_TAG.
-
-    This test verifies that:
-    1. IMAGE_TAG can be a semver with or without v prefix (0.1.2 or v0.1.2)
-    2. Semver tags are treated like production tags and update all stacks
-    3. PRs are created with the correct information
-    """
-    base_dir, mock_repo, mock_github_repo = cli_test_env
-
-    # Set environment variables with semver image tag (no v prefix)
-    os.environ["HELM_CHART"] = "test-chart"
-    os.environ["IMAGE_TAG"] = "1.2.3"  # Semver without v prefix
-
-    # Track PRs
-    created_prs = []
-
-    def mock_create_branch_commit_and_pr(self, branch_name, files_to_commit, commit_message, pr_title, pr_body, base_branch="main", auto_merge=False, labels=None):
-        """Mock PR creation to track PR details."""
-        created_prs.append({"branch": branch_name, "title": pr_title, "base": base_branch})
-        print(f"Created PR: {pr_title} (branch: {branch_name}, base: {base_branch})")
-        return "https://github.com/mock-org/mock-repo/pull/123"
-
-    # Mock create_pr but use real config
-    with patch("helm_image_updater.io_layer.IOLayer.create_branch_commit_and_pr", mock_create_branch_commit_and_pr):
-        # Run CLI
-        cli.main()
-
-    # Check console output
-    captured = capsys.readouterr()
-    assert "Processing Helm chart: test-chart" in captured.out
-    assert "New image tag: 1.2.3" in captured.out
-
-    # Verify tag.yaml was updated in both dev and prod stacks (like production tag)
-    dev_tag_yaml = read_tag_yaml(
-        base_dir / "dev-keboola-gcp-us-central1" / "test-chart" / "tag.yaml"
-    )
-    assert dev_tag_yaml["image"]["tag"] == "1.2.3"
-
-    prod_tag_yaml = read_tag_yaml(
-        base_dir / "com-keboola-gcp-prod" / "test-chart" / "tag.yaml"
-    )
-    assert prod_tag_yaml["image"]["tag"] == "1.2.3"
-
-    # Verify PR was created
-    assert len(created_prs) == 1
-    assert "test-chart" in created_prs[0]["title"]
-
-    # Test with v-prefixed semver
-    os.environ.clear()
-    os.environ["GH_TOKEN"] = "fake-token"
-    os.environ["GH_APPROVE_TOKEN"] = "fake-approve-token"
-    os.environ["HELM_CHART"] = "test-chart"
-    os.environ["IMAGE_TAG"] = "v2.3.4"  # Semver with v prefix
-
-    # Reset mocks and stacks
-    created_prs.clear()
-
-    # Mock create_pr but use real config
-    with patch("helm_image_updater.io_layer.IOLayer.create_branch_commit_and_pr", mock_create_branch_commit_and_pr):
-        # Run CLI
-        cli.main()
-
-    # Check console output
-    captured = capsys.readouterr()
-    assert "Processing Helm chart: test-chart" in captured.out
-    assert "New image tag: v2.3.4" in captured.out
-
-    # Verify tag.yaml was updated in both dev and prod stacks (like production tag)
-    dev_tag_yaml = read_tag_yaml(
-        base_dir / "dev-keboola-gcp-us-central1" / "test-chart" / "tag.yaml"
-    )
-    assert dev_tag_yaml["image"]["tag"] == "v2.3.4"
-
-    prod_tag_yaml = read_tag_yaml(
-        base_dir / "com-keboola-gcp-prod" / "test-chart" / "tag.yaml"
-    )
-    assert prod_tag_yaml["image"]["tag"] == "v2.3.4"
-
-    # Verify PR was created
-    assert len(created_prs) == 1
-    assert "test-chart" in created_prs[0]["title"]
-
-
 def test_canary_tag_in_extra_tag_should_update_canary_stack(cli_test_env, mock_git_operations, capsys):
     """Test that canary tag in EXTRA_TAG properly updates canary stack.
 
@@ -1233,7 +827,6 @@ def test_canary_tag_in_extra_tag_should_update_canary_stack(cli_test_env, mock_g
     # Test scenario: canary tag in EXTRA_TAG1 only (no IMAGE_TAG)
     os.environ["HELM_CHART"] = "test-chart"
     os.environ["EXTRA_TAG1"] = "image.tag:canary-orion-xyz789"  # Canary tag in extra tag
-    os.environ["AUTOMERGE"] = "true"
 
     with patch("helm_image_updater.io_layer.IOLayer.create_branch_commit_and_pr", mock_create_branch_commit_and_pr):
         cli.main()

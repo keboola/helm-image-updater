@@ -34,7 +34,6 @@ def test_wave_grouping_one_pr_per_wave_with_labels():
 
     plan = Mock()
     plan.strategy = UpdateStrategy.PRODUCTION
-    plan.multi_stage = False
     plan.helm_chart = "dummy-service"
     plan.image_tag = "production-abc123"
 
@@ -66,7 +65,7 @@ def test_wave_grouping_requires_all_waves_0_to_3():
     io = Mock()
     io.read_yaml.side_effect = _wave_metadata(waves)
     config = Mock(); config.deploy_strategy = DeployStrategy.GRADUAL
-    plan = Mock(); plan.strategy = UpdateStrategy.PRODUCTION; plan.multi_stage = False
+    plan = Mock(); plan.strategy = UpdateStrategy.PRODUCTION
     plan.helm_chart = "dummy-service"; plan.image_tag = "production-abc"
 
     with pytest.raises(RuntimeError, match="wave"):
@@ -78,8 +77,8 @@ from helm_image_updater.plan_builder import _should_auto_merge
 
 def test_wave_pr_type_never_auto_merges():
     plan = Mock(); plan.strategy = UpdateStrategy.PRODUCTION
-    assert _should_auto_merge(plan, "wave", user_requested=True) is False
-    assert _should_auto_merge(plan, "wave", user_requested=False) is False
+    # wave PRs are merged by release-promoter, never by HIU (pr_type short-circuit)
+    assert _should_auto_merge(plan, "wave", ["dev-keboola-gcp-us-central1"]) is False
 
 
 def test_wave_grouping_rejects_gap():
@@ -93,7 +92,7 @@ def test_wave_grouping_rejects_gap():
     io = Mock()
     io.read_yaml.side_effect = _wave_metadata(waves)
     config = Mock(); config.deploy_strategy = DeployStrategy.GRADUAL
-    plan = Mock(); plan.strategy = UpdateStrategy.PRODUCTION; plan.multi_stage = False
+    plan = Mock(); plan.strategy = UpdateStrategy.PRODUCTION
     plan.helm_chart = "dummy-service"; plan.image_tag = "production-abc"
 
     with pytest.raises(RuntimeError, match="wave"):
@@ -111,7 +110,7 @@ def test_wave_grouping_rejects_missing_last():
     io = Mock()
     io.read_yaml.side_effect = _wave_metadata(waves)
     config = Mock(); config.deploy_strategy = DeployStrategy.GRADUAL
-    plan = Mock(); plan.strategy = UpdateStrategy.PRODUCTION; plan.multi_stage = False
+    plan = Mock(); plan.strategy = UpdateStrategy.PRODUCTION
     plan.helm_chart = "dummy-service"; plan.image_tag = "production-abc"
 
     with pytest.raises(RuntimeError, match="wave"):
@@ -137,7 +136,7 @@ def test_wave_grouping_missing_metadata_uses_defaults():
     io = Mock()
     io.read_yaml.side_effect = _read
     config = Mock(); config.deploy_strategy = DeployStrategy.GRADUAL
-    plan = Mock(); plan.strategy = UpdateStrategy.PRODUCTION; plan.multi_stage = False
+    plan = Mock(); plan.strategy = UpdateStrategy.PRODUCTION
     plan.helm_chart = "dummy-service"; plan.image_tag = "production-abc123"
 
     all_stacks = [dev_stack] + list(waves_explicit.keys())
@@ -154,11 +153,10 @@ from helm_image_updater.plan_builder import _create_pr_plan
 
 
 def test_create_pr_plan_wave_sets_labels_and_branch_title():
-    config = Mock(); config.automerge = False
+    config = Mock()
     config.deploy_strategy = DeployStrategy.GRADUAL
     plan = Mock()
     plan.strategy = UpdateStrategy.PRODUCTION
-    plan.multi_stage = False
     plan.helm_chart = "dummy-service"
     plan.image_tag = "production-abc123"
     plan.extra_tags = []
@@ -186,11 +184,10 @@ def test_create_pr_plan_wave_sets_labels_and_branch_title():
 def test_create_pr_plan_wave_title_includes_extra_tags():
     """Wave titles must carry the SAME chart+tags string the release search link quotes —
     with extra tags, otherwise the quoted-phrase search matches nothing (ST-4035)."""
-    config = Mock(); config.automerge = False
+    config = Mock()
     config.deploy_strategy = DeployStrategy.GRADUAL
     plan = Mock()
     plan.strategy = UpdateStrategy.PRODUCTION
-    plan.multi_stage = False
     plan.helm_chart = "dummy-service"
     plan.image_tag = "production-abc123"
     plan.extra_tags = [{"path": "agent.tag", "value": "production-agent-xyz"}]
@@ -218,7 +215,7 @@ def test_create_pr_plan_wave_title_includes_extra_tags():
 
 def test_wave_never_auto_merges_even_for_canary_strategy():
     plan = Mock(); plan.strategy = UpdateStrategy.CANARY
-    assert _should_auto_merge(plan, "wave", user_requested=True) is False
+    assert _should_auto_merge(plan, "wave", ["dev-keboola-gcp-us-central1"]) is False
 
 
 from helm_image_updater.io_layer import IOLayer
@@ -383,7 +380,7 @@ def test_wave_grouping_excludes_e2e_stacks():
     }
     io = Mock(); io.read_yaml.side_effect = _wave_metadata(waves)
     config = Mock(); config.deploy_strategy = DeployStrategy.GRADUAL
-    plan = Mock(); plan.strategy = UpdateStrategy.PRODUCTION; plan.multi_stage = False
+    plan = Mock(); plan.strategy = UpdateStrategy.PRODUCTION
     plan.helm_chart = "dummy-service"; plan.image_tag = "production-abc"
     # an unlisted e2e stack must be dropped from waves, not placed in wave 3
     changes = [_stack_change(s) for s in waves] + [_stack_change("foo-bar-e2e")]
@@ -400,11 +397,10 @@ from helm_image_updater.message_generation import wave_release_search_link
 
 
 def _pr_plan_mocks(pr_type, wave_number=None):
-    config = Mock(); config.automerge = False
+    config = Mock()
     config.deploy_strategy = DeployStrategy.GRADUAL
     plan = Mock()
     plan.strategy = UpdateStrategy.PRODUCTION
-    plan.multi_stage = False
     plan.helm_chart = "dummy-service"
     plan.image_tag = "production-abc123"
     plan.extra_tags = [{"path": "agent.tag", "value": "production-xyz"}]

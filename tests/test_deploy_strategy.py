@@ -23,7 +23,6 @@ def test_deploy_strategy_defaults_to_standard():
 def test_deploy_strategy_parses_known_values():
     for raw, expected in [
         ("standard", DeployStrategy.STANDARD),
-        ("cloud_multi_stage", DeployStrategy.CLOUD_MULTI_STAGE),
         ("gradual", DeployStrategy.GRADUAL),
         ("critical", DeployStrategy.CRITICAL),
         ("critical-manual-gate", DeployStrategy.CRITICAL_MANUAL_GATE),
@@ -32,22 +31,10 @@ def test_deploy_strategy_parses_known_values():
         assert cfg.deploy_strategy == expected
 
 
-def test_multi_stage_true_aliases_to_cloud_multi_stage_when_unset():
-    cfg = EnvironmentConfig.from_env(_base_env(MULTI_STAGE="true"))
-    assert cfg.deploy_strategy == DeployStrategy.CLOUD_MULTI_STAGE
-
-
 def test_unknown_deploy_strategy_does_not_silently_become_standard():
     cfg = EnvironmentConfig.from_env(_base_env(DEPLOY_STRATEGY="gradul"))
     # Parsed value stays unset/standard, but an error is recorded for validate() (Task 2).
     assert cfg._deploy_strategy_error is not None
-
-
-def test_cloud_multi_stage_sets_multi_stage_flag():
-    # DEPLOY_STRATEGY=cloud_multi_stage must drive the legacy multi_stage grouping branch.
-    cfg = EnvironmentConfig.from_env(_base_env(DEPLOY_STRATEGY="cloud_multi_stage"))
-    assert cfg.deploy_strategy == DeployStrategy.CLOUD_MULTI_STAGE
-    assert cfg.multi_stage is True
 
 
 def test_unknown_deploy_strategy_is_a_validation_error():
@@ -93,13 +80,6 @@ def test_prplan_labels_can_be_set():
         labels=["release:wave:0"],
     )
     assert p.labels == ["release:wave:0"]
-
-
-def test_explicit_standard_overrides_multi_stage_flag():
-    # DEPLOY_STRATEGY=standard wins over MULTI_STAGE=true: multi_stage must be False.
-    cfg = EnvironmentConfig.from_env(_base_env(DEPLOY_STRATEGY="standard", MULTI_STAGE="true"))
-    assert cfg.deploy_strategy == DeployStrategy.STANDARD
-    assert cfg.multi_stage is False
 
 
 def test_wave_strategy_ok_with_production_extra_tag_only():
@@ -176,38 +156,3 @@ def test_resolve_wave_rejects_non_integer():
         resolve_wave("kbc-us-east-1", {"rollout_wave": True})
 
 
-def test_promoter_managed_standard_requires_explicit_standard_and_automerge_false():
-    # Explicit DEPLOY_STRATEGY=standard + automerge=false → promoter-managed 2-wave.
-    cfg = EnvironmentConfig.from_env(_base_env(DEPLOY_STRATEGY="standard", AUTOMERGE="false"))
-    assert cfg.promoter_managed_standard is True
-    assert cfg.deploy_strategy == DeployStrategy.STANDARD
-    assert cfg.multi_stage is False
-
-
-def test_promoter_managed_standard_ignores_automerge_for_explicit_standard():
-    # Explicit standard → promoter-managed 2-wave regardless of AUTOMERGE (ST-4126):
-    # AUTOMERGE is ignored, exactly like the wave strategies.
-    for automerge in ("true", "false"):
-        cfg = EnvironmentConfig.from_env(_base_env(DEPLOY_STRATEGY="standard", AUTOMERGE=automerge))
-        assert cfg.promoter_managed_standard is True, f"automerge={automerge}"
-
-
-def test_promoter_managed_standard_off_for_default_empty_strategy():
-    # Empty DEPLOY_STRATEGY (the action default) collapses to STANDARD but is NOT explicit;
-    # even with automerge=false it must stay the legacy per-stack path.
-    cfg = EnvironmentConfig.from_env(_base_env(DEPLOY_STRATEGY="", AUTOMERGE="false"))
-    assert cfg.deploy_strategy == DeployStrategy.STANDARD
-    assert cfg.promoter_managed_standard is False
-
-
-def test_promoter_managed_standard_off_for_wave_strategies():
-    cfg = EnvironmentConfig.from_env(_base_env(DEPLOY_STRATEGY="gradual", AUTOMERGE="false"))
-    assert cfg.promoter_managed_standard is False
-
-
-def test_empty_deploy_strategy_with_multi_stage_aliases_to_cloud_multi_stage():
-    # The action passes deploy-strategy='' by default; empty must behave as unset
-    # so MULTI_STAGE=true still aliases to cloud_multi_stage (legacy action callers).
-    cfg = EnvironmentConfig.from_env(_base_env(DEPLOY_STRATEGY="", MULTI_STAGE="true"))
-    assert cfg.deploy_strategy == DeployStrategy.CLOUD_MULTI_STAGE
-    assert cfg.multi_stage is True
