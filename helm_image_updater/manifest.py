@@ -78,6 +78,7 @@ def build_manifest(
     waves: Dict[int, int],
     source_sha: Optional[str] = None,
     source_pr: Optional[str] = None,
+    source_pr_author: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Build the v1 manifest object. `waves` maps wave number -> PR number."""
     manifest: Dict[str, Any] = {
@@ -92,6 +93,8 @@ def build_manifest(
         manifest["sourceSha"] = source_sha
     if source_pr:
         manifest["sourcePr"] = source_pr
+    if source_pr_author:
+        manifest["sourcePrAuthor"] = source_pr_author
     return manifest
 
 
@@ -103,6 +106,7 @@ def build_manual_manifest(
     members,
     source_sha: Optional[str] = None,
     source_pr: Optional[str] = None,
+    source_pr_author: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Build the manual-per-stack (ST-4157) v1 manifest: a flat member set, NO waves.
     `members` are the member PR numbers (sorted for determinism; anchor = min)."""
@@ -118,6 +122,8 @@ def build_manual_manifest(
         manifest["sourceSha"] = source_sha
     if source_pr:
         manifest["sourcePr"] = source_pr
+    if source_pr_author:
+        manifest["sourcePrAuthor"] = source_pr_author
     return manifest
 
 
@@ -157,7 +163,7 @@ def is_manifest_v1(x: Any) -> bool:
     app = x.get("app")
     if not isinstance(app, str) or not app:
         return False
-    for opt in ("sourceSha", "sourcePr"):
+    for opt in ("sourceSha", "sourcePr", "sourcePrAuthor"):
         if opt in x and not isinstance(x[opt], str):
             return False
     # mode discriminator (ST-4157): "manual-per-stack" ⇒ flat members set, NO waves.

@@ -293,6 +293,31 @@ def test_build_manifest_context_with_real_sha():
     assert ctx["source_pr"] == "https://x/pull/1"
 
 
+def test_manifest_context_extracts_pr_author():
+    plan = Mock()
+    plan.helm_chart = "connection"
+    plan.image_tag = "production-abc"
+    plan.extra_tags = None
+    plan.metadata = {"source": {"sha": "deadbeef0123FULL", "pr_url": "https://x/pull/1",
+                                 "pr_author": "zajca"}}
+
+    ctx = _build_manifest_context(plan)
+
+    assert ctx["source_pr_author"] == "zajca"
+
+
+def test_manifest_context_pr_author_none_when_absent():
+    plan = Mock()
+    plan.helm_chart = "connection"
+    plan.image_tag = "production-abc"
+    plan.extra_tags = None
+    plan.metadata = {"source": {"sha": "deadbeef0123FULL", "pr_url": "https://x/pull/1"}}
+
+    ctx = _build_manifest_context(plan)
+
+    assert ctx["source_pr_author"] is None
+
+
 def test_build_manifest_context_with_unknown_sha():
     plan = Mock()
     plan.helm_chart = "connection"
