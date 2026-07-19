@@ -1,9 +1,11 @@
-"""Tests for the `rollback` DEPLOY_STRATEGY (ST-4277, Task B1).
+"""Tests for the `rollback` DEPLOY_STRATEGY (ST-4277, Task B1)
+and the rollback instanceId computation (ST-4277, Task B2).
 
 Mirrors the fixtures/helpers used in tests/test_deploy_strategy.py.
 """
 
 from helm_image_updater.environment import EnvironmentConfig
+from helm_image_updater.manifest import compute_rollback_instance_id
 from helm_image_updater.models import DeployStrategy
 
 
@@ -63,3 +65,35 @@ def test_rollback_rejects_dev_extra_tag_only():
     })
     errors = cfg.validate()
     assert any("requires a production" in e for e in errors)
+
+
+# ---------------------------------------------------------------------------
+# compute_rollback_instance_id (ST-4277, Task B2)
+# ---------------------------------------------------------------------------
+
+def test_rollback_instance_id_shape():
+    # <app>-rollback-<sig>-<run_id>, sig = the ST-4190 compute_instance_id signature
+    # (tag/extras) minus the app prefix. Distinct from the plain <app>-<tag> id so the
+    # rollback release never collides with the original release's instanceId.
+    assert compute_rollback_instance_id("connection", "production-1.2.3", [], "16234567890") \
+        == "connection-rollback-production-1.2.3-16234567890"
+
+
+def test_rollback_instance_id_extras_only():
+    # Empty tag (extra-tags-only rollback) folds the extras exactly like compute_instance_id.
+    rid = compute_rollback_instance_id("connection", "", [{"path": "a.b", "value": "1"}], "99")
+    assert rid == "connection-rollback-a.b=1-99"
+
+
+def test_rollback_instance_id_idempotent_same_run_id():
+    # A re-run of the SAME workflow run (same run_id) keeps the same id.
+    a = compute_rollback_instance_id("connection", "production-1.2.3", [], "111")
+    b = compute_rollback_instance_id("connection", "production-1.2.3", [], "111")
+    assert a == b
+
+
+def test_rollback_instance_id_distinct_per_run_id():
+    # A fresh dispatch (different run_id) gets a new id, even for the same payload.
+    a = compute_rollback_instance_id("connection", "production-1.2.3", [], "111")
+    b = compute_rollback_instance_id("connection", "production-1.2.3", [], "222")
+    assert a != b
