@@ -9,7 +9,7 @@ A Python tool for automating image tag updates across Helm charts in different K
 - Creates pull requests with detailed descriptions
 - Production deploys are always release-promoter-managed; dev/canary/override deploys are auto-merged fast by HIU
 - Dry-run mode for testing changes
-- Promoter rollout strategies (standard 2-wave, gradual/critical waves, manual-per-stack)
+- Promoter rollout strategies (standard 2-wave, gradual/critical waves, manual-per-stack, rollback)
 - Extra tag updates for complex configurations
 - Detailed logging and error handling
 - Automatically removes ArgoCD branch overrides (`appManifestsRevision`) from `values.yaml` in the same PR
@@ -53,7 +53,7 @@ Required:
 Optional:
 
 - `DRY_RUN`: Whether to perform a dry run (default: "false")
-- `DEPLOY_STRATEGY`: Rollout strategy (default/empty: `standard`): `standard`, `gradual`, `critical`, `critical-manual-gate`, or `manual-per-stack`. See [Deploy Strategies](#deploy-strategies). Whether a PR auto-merges is decided by tag class + target stacks (see [Auto-merge](#auto-merge-and-auto-approve)), not by a knob.
+- `DEPLOY_STRATEGY`: Rollout strategy (default/empty: `standard`): `standard`, `gradual`, `critical`, `critical-manual-gate`, `manual-per-stack`, or `rollback`. See [Deploy Strategies](#deploy-strategies). Whether a PR auto-merges is decided by tag class + target stacks (see [Auto-merge](#auto-merge-and-auto-approve)), not by a knob.
 - `TARGET_PATH`: Path to the directory containing the stacks (default: ".")
 - `OVERRIDE_STACK`: Stack ID to explicitly target for the update, bypassing automatic stack selection (default: None)
 - `EXTRA_TAG1`, `EXTRA_TAG2`: Additional tags to update (format: "path:value")
@@ -86,7 +86,7 @@ Minimal usage example (always pin to a released version — see [Releasing](#rel
     helm-chart: "dummy-service"
     image-tag: "dev-b10536c41180e420eaf083451a1ddee132f512c6"
     dry-run: "false"
-    deploy-strategy: ""  # empty = standard | gradual | critical | critical-manual-gate | manual-per-stack
+    deploy-strategy: ""  # empty = standard | gradual | critical | critical-manual-gate | manual-per-stack | rollback
     override-stack: "dev-keboola-gcp-us-central1"
     extra-tag1: "agent.image.tag:dev-2.0.0"
     extra-tag2: "messenger.image.tag:dev-2.0.0"
@@ -116,7 +116,7 @@ on:
         type: boolean
         default: false
       deploy-strategy:
-        description: "Rollout strategy (empty = standard): standard | gradual | critical | critical-manual-gate | manual-per-stack"
+        description: "Rollout strategy (empty = standard): standard | gradual | critical | critical-manual-gate | manual-per-stack | rollback"
         required: false
         type: string
         default: ''
@@ -263,6 +263,7 @@ If `argocdApplication` only contained `appManifestsRevision`, the entire block i
 | empty → `standard` | promoter-managed **2-wave dev→prod**: wave 0 = all dev stacks (anchor, carries the manifest), wave 1 = all prod stacks | release-promoter merges dev → prod |
 | `gradual` · `critical` · `critical-manual-gate` | 4 unmerged **wave** PRs (waves 0–3) | release-promoter merges wave-by-wave |
 | `manual-per-stack` | **one PR per stack (dev + prod), no waves** | a human merges each in any order; release-promoter completes |
+| `rollback` | **one PR, wave 0, over every stack (dev + prod) whose `tag.yaml` differs from the target** | release-promoter merges — never auto-merged by HIU |
 
 Non-production deploys (`dev-*` / `canary-*` tags and `override-stack` targets) ignore `DEPLOY_STRATEGY` — they stay single-PR deploys and are auto-merged by HIU (see [Auto-merge](#auto-merge-and-auto-approve)).
 
@@ -279,6 +280,10 @@ Only **`PRODUCTION`** deploys are staged: a `dev-*` tag (DEV), a `canary-*` tag,
 ### Manual-per-stack (one PR per stack)
 
 An **explicit** `DEPLOY_STRATEGY=manual-per-stack` on a **`production-`/semver tag** emits a deliberately **order-independent** release: **one unmerged PR per stack** (no waves), each labelled `deploy:manual-per-stack` and auto-approved. Members are **every stack the production tag lands on — dev AND prod** (a production tag deploys to dev stacks too; only prod stacks are tag-restricted), excluding canary/e2e. A human merges each member PR in **any order**; [release-promoter](https://github.com/keboola/release-promoter) completes the release once **all** members are merged + synced (no sequencing, soak, UAT, or out-of-order hole). The **anchor** = the **lowest-numbered member PR**: it carries the `release:anchor` discovery label and the JSON **release manifest** (`mode:"manual-per-stack"` + the flat `members` list). Only `PRODUCTION` deploys are managed (`override-stack`/`canary`/`dev-*` keep their own handling). Identity is `instanceId = <app>-<image_tag>` (derived from the deployed tag(s) — see the `standard` section); a duplicate fan-out for the same `instanceId` is refused while an anchor is still open (the rerun guard scans both `release:wave:0` and `release:anchor` anchors).
+
+### Rollback (fleet-converging recovery)
+
+An **explicit** `DEPLOY_STRATEGY=rollback` on a **production/semver** tag emits a **fleet-converging, single-wave recovery deploy**: **one unmerged PR, wave 0**, over **every stack (dev + prod together)** whose `tag.yaml` currently differs from the target — set via `IMAGE_TAG` and/or `EXTRA_TAG1`/`EXTRA_TAG2`, with an optional reason (`metadata.source.reason`) rendered as a `**Reason:**` line in the PR body. The title is marked `⏪ ROLLBACK` rather than "wave N" so it reads as a rollback at a glance. Verification is **sync-only** (no UAT, no soak): [release-promoter](https://github.com/keboola/release-promoter) preempts any older in-flight release of the same app and merges the rollback PR itself — HIU never auto-merges it. `rollback` is incompatible with `override-stack` and requires a production/semver target. **Zero-diff boundary:** if the target tag is already on every stack there is no diff to deploy, and HIU hard-fails rather than opening an empty PR — cancelling queued releases without deploying anything is what `promoter:abandon-release` is for, not `rollback`.
 
 > **Prerequisite (wave strategies):** the deploy token needs `Issues: write` (PR labels go through the Issues API), and release-promoter's merge identity needs `Contents: write` + `Pull requests: write` and must be a bypass actor on the target branch's ruleset.
 

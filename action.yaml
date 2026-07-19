@@ -12,7 +12,7 @@ inputs:
     required: false
     default: 'false'
   deploy-strategy:
-    description: 'Promoter deploy strategy: standard | gradual | critical | critical-manual-gate | manual-per-stack (empty = standard). Production deploys are always promoter-managed; auto-merge is decided by tag class + target stacks.'
+    description: 'Promoter deploy strategy: standard | gradual | critical | critical-manual-gate | manual-per-stack | rollback (empty = standard). Production deploys are always promoter-managed; auto-merge is decided by tag class + target stacks.'
     required: false
     default: ''
   commit-sha:
