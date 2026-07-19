@@ -22,6 +22,7 @@ class DeployStrategy(Enum):
     CRITICAL = "critical"
     CRITICAL_MANUAL_GATE = "critical-manual-gate"
     MANUAL_PER_STACK = "manual-per-stack"
+    ROLLBACK = "rollback"
 
     @property
     def is_wave(self) -> bool:
@@ -29,7 +30,8 @@ class DeployStrategy(Enum):
         (`_group_changes_by_wave`). MUST exclude STANDARD — its 2-wave dev→prod
         grouping is contiguous-from-0 by construction and must not hit the
         0..3-required guard. MUST also exclude MANUAL_PER_STACK (ST-4157) — it has
-        NO waves (one PR per stack, flat member set)."""
+        NO waves (one PR per stack, flat member set). MUST also exclude ROLLBACK
+        (ST-4277) — it is 1 PR / wave 0 / all changed stacks, no 0..3 grouping."""
         return self in (
             DeployStrategy.GRADUAL,
             DeployStrategy.CRITICAL,
@@ -40,15 +42,19 @@ class DeployStrategy(Enum):
     def is_promoter_managed(self) -> bool:
         """Strategy-level CAPABILITY: EVERY strategy is promoter-capable (ST-4159 removed
         the only non-promoter strategy, cloud_multi_stage). PRs are created unmerged,
-        labelled, carrying a manifest. Superset of `is_wave` (adds STANDARD 2-wave dev→prod
-        and MANUAL_PER_STACK one-PR-per-stack).
+        labelled, carrying a manifest. Superset of `is_wave` (adds STANDARD 2-wave dev→prod,
+        MANUAL_PER_STACK one-PR-per-stack, and ROLLBACK one-PR/wave-0/all-stacks).
 
         NOTE: this is about the STRATEGY, not a given run. Whether a specific run is
         actually promoter-managed is gated at the PLAN level, not the strategy level: only
         a PRODUCTION deploy is staged — DEV/CANARY/OVERRIDE runs keep their own single-PR
         auto-merged handling. The run-time condition lives in
         `plan_builder._is_promoter_managed_standard` / `_is_promoter_managed_manual_per_stack`."""
-        return self.is_wave or self in (DeployStrategy.STANDARD, DeployStrategy.MANUAL_PER_STACK)
+        return self.is_wave or self in (
+            DeployStrategy.STANDARD,
+            DeployStrategy.MANUAL_PER_STACK,
+            DeployStrategy.ROLLBACK,
+        )
 
 
 @dataclass

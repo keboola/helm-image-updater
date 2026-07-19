@@ -80,7 +80,7 @@ class EnvironmentConfig:
                 deploy_strategy_error = (
                     f"Invalid DEPLOY_STRATEGY: '{raw_strategy}'. "
                     "Must be one of: standard, gradual, critical, "
-                    "critical-manual-gate, manual-per-stack"
+                    "critical-manual-gate, manual-per-stack, rollback"
                 )
         if env.get("MULTI_STAGE", "false").lower() == "true":
             print(
@@ -226,6 +226,28 @@ class EnvironmentConfig:
                 if tag_type not in (TagType.PRODUCTION, TagType.SEMVER):
                     errors.append(
                         f"DEPLOY_STRATEGY 'manual-per-stack' requires a production/semver "
+                        f"IMAGE_TAG or EXTRA_TAG, got '{rollout_tag}'"
+                    )
+
+        # rollback (ST-4277): 1 PR / wave 0 / all changed stacks, never auto-merged —
+        # a production rollout like the wave strategies, so it is incompatible with
+        # OVERRIDE_STACK and requires a production/semver tag (via IMAGE_TAG or an
+        # EXTRA_TAG). This is LOAD-BEARING, not hygiene: a dev-/canary-classified
+        # target would otherwise route the plan as a DEV/CANARY deploy and silently
+        # skip preemption (single auto-merged PR) -- see RFC ST-4277 §3.2.
+        if self.deploy_strategy == DeployStrategy.ROLLBACK:
+            rollout_tag = self._production_rollout_tag()
+            if self.override_stack:
+                errors.append("DEPLOY_STRATEGY rollback is incompatible with OVERRIDE_STACK")
+            elif not rollout_tag:
+                errors.append(
+                    "DEPLOY_STRATEGY 'rollback' requires a production/semver IMAGE_TAG or EXTRA_TAG"
+                )
+            else:
+                tag_type = detect_tag_type(rollout_tag)
+                if tag_type not in (TagType.PRODUCTION, TagType.SEMVER):
+                    errors.append(
+                        f"DEPLOY_STRATEGY 'rollback' requires a production/semver "
                         f"IMAGE_TAG or EXTRA_TAG, got '{rollout_tag}'"
                     )
 
