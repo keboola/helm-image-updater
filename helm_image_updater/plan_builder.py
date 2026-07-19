@@ -12,7 +12,7 @@ _ryaml.preserve_quotes = True
 
 from .models import UpdatePlan, FileChange, PRPlan, UpdateStrategy, TagChange, DeployStrategy
 from .wave_planning import wave_label, deploy_label, resolve_wave
-from .manifest import compute_instance_id, extract_instance_id
+from .manifest import compute_instance_id, extract_instance_id, compute_rollback_instance_id
 from .environment import EnvironmentConfig
 from .io_layer import IOLayer
 from .tag_classification import detect_tag_type, TagType
@@ -22,6 +22,7 @@ from .message_generation import (
     generate_commit_message,
     generate_pr_title,
     generate_pr_title_prefix,
+    generate_rollback_pr_title,
     format_pr_body_with_metadata,
     wave_release_search_link,
     manual_release_search_link,
@@ -50,6 +51,19 @@ def _is_promoter_managed_manual_per_stack(config: EnvironmentConfig, plan: Updat
     their own handling and are never promoter-managed. One PR per prod stack, no waves."""
     return (
         config.deploy_strategy == DeployStrategy.MANUAL_PER_STACK
+        and plan.strategy == UpdateStrategy.PRODUCTION
+    )
+
+
+def _is_promoter_managed_rollback(config: EnvironmentConfig, plan: UpdatePlan) -> bool:
+    """True iff this run is a promoter-managed `rollback` release (ST-4277): DEPLOY_STRATEGY=
+    rollback AND a PRODUCTION-classified target. Mirrors `_is_promoter_managed_standard` /
+    `_is_promoter_managed_manual_per_stack` so the manifest/guard wiring in `prepare_plan`
+    can never diverge from `_group_changes_for_prs`'s rollback branch, which independently
+    hard-raises on a non-production target (B1 already validates this at the env layer;
+    this is defense-in-depth, not the primary check)."""
+    return (
+        config.deploy_strategy == DeployStrategy.ROLLBACK
         and plan.strategy == UpdateStrategy.PRODUCTION
     )
 
@@ -102,6 +116,19 @@ def prepare_plan(config: EnvironmentConfig, io_layer: IOLayer) -> UpdatePlan:
     stack_changes = _calculate_all_changes(plan, io_layer)
     
     if not stack_changes:
+        if config.deploy_strategy == DeployStrategy.ROLLBACK:
+            # ST-4277 §2 boundary: a rollback whose target tag is already on every stack
+            # has an EMPTY diff -- HIU cannot open a PR, so no rollback release exists and
+            # nothing preempts. That is by design: a rollback is a deploy, not a pure
+            # cancel. Cancelling queued releases without deploying anything is what
+            # `promoter:abandon-release` is for -- surface that guidance here rather than
+            # the generic noop message.
+            raise RuntimeError(
+                f"\nError: rollback found no stacks to update for chart {plan.helm_chart} -- "
+                f"the target tag is already on every stack (zero diff). Rollback is a deploy, "
+                f"not a pure cancel: to cancel queued releases without deploying anything, "
+                f"label their anchor PRs `promoter:abandon-release`."
+            )
         raise RuntimeError(
             f"\nError: tag.yaml for chart {plan.helm_chart} does not exist in any stack or all tags are already up to date (noop change)."
         )
@@ -116,15 +143,16 @@ def prepare_plan(config: EnvironmentConfig, io_layer: IOLayer) -> UpdatePlan:
     pr_groups = _group_changes_for_prs(stack_changes, plan, config, io_layer)
 
     # Promoter-managed modes (wave strategies + promoter-managed `standard` ST-4126 +
-    # `manual-per-stack` ST-4157): derive the manifest identity, then guard against a
-    # duplicate fan-out.
+    # `manual-per-stack` ST-4157 + `rollback` ST-4277): derive the manifest identity,
+    # then guard against a duplicate fan-out.
     promoter_managed = (
         config.deploy_strategy.is_wave
         or _is_promoter_managed_standard(config, plan)
         or _is_promoter_managed_manual_per_stack(config, plan)
+        or _is_promoter_managed_rollback(config, plan)
     )
     if promoter_managed and pr_groups:
-        plan.manifest_context = _build_manifest_context(plan)
+        plan.manifest_context = _build_manifest_context(plan, config)
         if not config.dry_run:
             _guard_release_not_already_open(plan.manifest_context["instance_id"], io_layer)
 
@@ -468,6 +496,26 @@ def _group_changes_for_prs(
 ) -> List[Dict[str, Any]]:
     """Group changes into pull requests based on strategy."""
 
+    # ST-4277 rollback: ONE wave-0 PR over every changed stack (fleet-converging),
+    # never auto-merged; the promoter preempts older releases then merges it. This
+    # branch is FIRST (before is_wave) and hard-raises on a non-production target --
+    # B1's env-layer validation already rejects a non-production rollback, but this guard
+    # makes a silent fall-through to the auto-merged DEV/OVERRIDE tail below IMPOSSIBLE
+    # (a rollback that skips preemption must never exist).
+    if config.deploy_strategy == DeployStrategy.ROLLBACK:
+        if plan.strategy != UpdateStrategy.PRODUCTION:
+            raise RuntimeError(
+                f"rollback requires a production/semver-classified target (got {plan.strategy.value})"
+            )
+        return [{
+            'stacks': [sc['stack'] for sc in stack_changes],
+            'changes': stack_changes,
+            'base_branch': 'main',
+            'pr_type': 'wave',
+            'wave_number': 0,
+            'labels': [wave_label(0), deploy_label(config.deploy_strategy)],
+        }]
+
     # Promoter-managed wave strategies: one PR per wave (0..3), unmerged, labeled.
     if config.deploy_strategy.is_wave:
         return _group_changes_by_wave(stack_changes, plan, config, io_layer)
@@ -514,19 +562,44 @@ def _group_changes_for_prs(
     }]
 
 
-def _build_manifest_context(plan: UpdatePlan) -> Dict[str, Any]:
-    """Compute the wave-0 manifest's identity fields from the plan + pipeline metadata."""
+def _build_manifest_context(plan: UpdatePlan, config: Optional[EnvironmentConfig] = None) -> Dict[str, Any]:
+    """Compute the wave-0 manifest's identity fields from the plan + pipeline metadata.
+
+    ST-4277: when `config.deploy_strategy == ROLLBACK`, the display_name/instance_id use
+    the rollback-specific shape (`compute_rollback_instance_id`), which is deliberately
+    DISTINCT from the ST-4190 `<app>-<signature>` id of the original release (a duplicate
+    instanceId would deadlock the promoter's Conflicted guard). `config` is optional and
+    defaults to the non-rollback shape so existing direct-`plan`-only callers/tests are
+    unaffected.
+
+    ALL strategies (rollback included) now also carry `image_tag`/`extra_tags` in the
+    returned context, so the executor can forward them into the live manifest.
+    """
     source = (plan.metadata or {}).get("source", {})
     source_sha = source.get("sha")
     source_pr = source.get("pr_url")
     source_pr_author = source.get("pr_author")
+
+    is_rollback = config is not None and config.deploy_strategy == DeployStrategy.ROLLBACK
+    if is_rollback:
+        display_name = f"ROLLBACK {plan.helm_chart} → {plan.image_tag or '(extra-tags)'}"
+        instance_id = compute_rollback_instance_id(
+            plan.helm_chart, plan.image_tag, plan.extra_tags,
+            os.getenv("GITHUB_RUN_ID", "local"),
+        )
+    else:
+        display_name = f"{plan.helm_chart}@{plan.image_tag}"
+        instance_id = compute_instance_id(plan.helm_chart, source_sha, plan.image_tag, plan.extra_tags)
+
     return {
         "app": plan.helm_chart,
-        "instance_id": compute_instance_id(plan.helm_chart, source_sha, plan.image_tag, plan.extra_tags),
-        "display_name": f"{plan.helm_chart}@{plan.image_tag}",
+        "instance_id": instance_id,
+        "display_name": display_name,
         "source_sha": source_sha if (source_sha and str(source_sha).lower() != "unknown") else None,
         "source_pr": source_pr or None,
         "source_pr_author": source_pr_author or None,
+        "image_tag": plan.image_tag,
+        "extra_tags": plan.extra_tags,
     }
 
 
@@ -696,12 +769,18 @@ def _create_pr_plan(pr_group: Dict[str, Any], plan: UpdatePlan, config: Environm
     # Generate PR title
     if pr_type == 'wave':
         wave = pr_group['wave_number']
-        # The suffix is the same chart+tags string (incl. extra tags) the release
-        # search link quotes — they must match or the search finds nothing (ST-4035).
-        pr_title = (
-            f"[{plan.helm_chart} {config.deploy_strategy.value} wave {wave}] "
-            f"{build_tag_string(plan.helm_chart, plan.image_tag, plan.extra_tags)}"
-        )
+        if config.deploy_strategy == DeployStrategy.ROLLBACK:
+            # ST-4277: a rollback gets its own title shape -- no "wave N" framing (a
+            # rollback is always exactly wave 0) and a ⏪ marker so it reads as a
+            # rollback at a glance, distinct from every other wave PR title.
+            pr_title = generate_rollback_pr_title(plan.helm_chart, plan.image_tag)
+        else:
+            # The suffix is the same chart+tags string (incl. extra tags) the release
+            # search link quotes — they must match or the search finds nothing (ST-4035).
+            pr_title = (
+                f"[{plan.helm_chart} {config.deploy_strategy.value} wave {wave}] "
+                f"{build_tag_string(plan.helm_chart, plan.image_tag, plan.extra_tags)}"
+            )
     elif pr_type == 'manual':
         stack = pr_group['stacks'][0]
         pr_title = (
@@ -737,6 +816,14 @@ def _create_pr_plan(pr_group: Dict[str, Any], plan: UpdatePlan, config: Environm
         metadata=plan.metadata,
         removed_overrides=removed_overrides,
     )
+
+    # ST-4277: rollback PR body gets an explicit reason line when the dispatcher supplied
+    # metadata.source.reason. This key is read ONLY by the rollback template (RFC §2) --
+    # a non-rollback PR must never render it even if present.
+    if config.deploy_strategy == DeployStrategy.ROLLBACK:
+        reason = (plan.metadata or {}).get("source", {}).get("reason")
+        if reason:
+            pr_body += f"\n\n**Reason:** {reason}"
 
     # Wave PRs: link a PR search that finds every wave PR of this release. The link
     # quotes the full chart+tags string (incl. extra tags), which every wave PR title
@@ -807,6 +894,10 @@ def _should_auto_merge(plan: UpdatePlan, pr_type: str, stacks: List[str]) -> boo
     The stack check is defense-in-depth: validate() rejects a dev/canary tag on a prod
     stack, but if one ever slips through we still must not auto-merge it. `not is_production`
     covers dev + e2e + canary and fails safe for a new/unknown stack name.
+
+    ST-4277: a `rollback` release ALSO hits this via `pr_type == 'wave'` (its grouping
+    always emits pr_type='wave', wave_number=0) -- it is a production-class path where
+    release-promoter (not HIU) owns the merge, exactly like every other wave/manual PR.
     """
     if pr_type in ('wave', 'manual'):
         print(f"    🧠 Auto-merge: FALSE (pr_type={pr_type}; release-promoter / human merges)")
