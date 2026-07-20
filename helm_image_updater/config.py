@@ -22,7 +22,7 @@ DEV_STACK_MAPPING = {
     "aws": "dev-keboola-aws-eu-west-1"
 }
 SUPPORTED_CLOUD_PROVIDERS = ["aws", "azure", "gcp"]
-EXCLUDED_STACKS = ["dev-keboola-gcp-us-east1-e2e", "dev-keboola-azure-east-us-2-e2e", "dev-keboola-aws-us-east-1-e2e"]
+EXCLUDED_STACKS = ["dev-keboola-gcp-us-east1-e2e", "dev-keboola-gcp-e2e-tags", "dev-keboola-azure-east-us-2-e2e", "dev-keboola-aws-us-east-1-e2e"]
 CANARY_STACKS = {
     "canary-orion": {
         "stack": "dev-keboola-canary-orion",
