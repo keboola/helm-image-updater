@@ -120,6 +120,65 @@ def test_executor_standard_1wave_manifest_shape():
     assert manifest["anchorWave"] == 0
 
 
+def test_executor_wave_manifest_includes_image_tag_and_extra_tags():
+    """ST-4277 B3: the wave-0 build_manifest call site must forward manifest_context's
+    image_tag/extra_tags so they reach the live anchor PR body (imageTag/extraTags)."""
+    plan = _wave_plan()
+    plan.manifest_context["image_tag"] = "production-abc"
+    plan.manifest_context["extra_tags"] = [{"path": "foo.bar", "value": "baz"}]
+    io = MagicMock()
+    io.create_branch_commit_and_pr.side_effect = [
+        f"https://github.com/keboola/kbc-stacks/pull/{10 + w}" for w in range(4)
+    ]
+    execute_plan(plan, io)
+
+    io.update_pull_request_body.assert_called_once()
+    (_, new_body), _ = io.update_pull_request_body.call_args
+    manifest = json.loads(JSON_FENCE_RE.findall(new_body)[0])
+    assert manifest["imageTag"] == "production-abc"
+    assert manifest["extraTags"] == ["foo.bar=baz"]
+
+
+def _manual_manifest_plan():
+    """A manual-per-stack style plan (2 member PRs, no waves)."""
+    plan = UpdatePlan(strategy=UpdateStrategy.PRODUCTION, helm_chart="connection",
+                      image_tag="production-abc")
+    plan.manifest_context = {"app": "connection", "instance_id": "connection-manual-abc",
+                             "display_name": "connection@production-abc",
+                             "source_sha": "abc", "source_pr": None,
+                             "image_tag": "production-abc",
+                             "extra_tags": [{"path": "foo.bar", "value": "baz"}]}
+    for i, stack in enumerate(["s0", "s1"]):
+        fc = FileChange(file_path=f"{stack}/connection/tag.yaml", old_content="a",
+                        new_content="b", change_description="d")
+        plan.file_changes.append(fc)
+        plan.pr_plans.append(PRPlan(branch_name=f"connection-manual-{stack}-production-abc-xxxx",
+                                    pr_title=f"m{i}", pr_body=f"BODY{i}", base_branch="main",
+                                    auto_merge=False, files_to_commit=[fc.file_path],
+                                    commit_message="c", labels=["deploy:manual-per-stack"],
+                                    manual_member=True))
+    return plan
+
+
+def test_executor_manual_manifest_includes_image_tag_and_extra_tags():
+    """ST-4277 B3: the manual-per-stack build_manual_manifest call site must ALSO forward
+    manifest_context's image_tag/extra_tags -- both call sites, or the fields never reach
+    a live PR body depending on which grouping mode produced the release."""
+    plan = _manual_manifest_plan()
+    io = MagicMock()
+    io.create_branch_commit_and_pr.side_effect = [
+        "https://github.com/keboola/kbc-stacks/pull/30",
+        "https://github.com/keboola/kbc-stacks/pull/31",
+    ]
+    execute_plan(plan, io)
+
+    io.update_pull_request_body.assert_called_once()
+    (_, new_body), _ = io.update_pull_request_body.call_args
+    manifest = json.loads(JSON_FENCE_RE.findall(new_body)[0])
+    assert manifest["imageTag"] == "production-abc"
+    assert manifest["extraTags"] == ["foo.bar=baz"]
+
+
 def test_executor_no_patch_when_not_wave_mode():
     plan = UpdatePlan(strategy=UpdateStrategy.PRODUCTION, helm_chart="connection", image_tag="t")
     fc = FileChange(file_path="s/connection/tag.yaml", old_content="a", new_content="b", change_description="d")

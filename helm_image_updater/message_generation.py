@@ -106,6 +106,19 @@ def build_tag_string(
     return f"{helm_chart}{image_tag_str}"
 
 
+def generate_rollback_pr_title(helm_chart: str, image_tag: str) -> str:
+    """PR title for a rollback release (ST-4277): ``⏪ ROLLBACK {chart} → {tag}``.
+
+    The ⏪ marker + distinct shape (no "wave N" framing -- a rollback is always exactly
+    wave 0) make it read as a rollback at a glance, distinct from every other wave PR
+    title. Falls back to "(extra-tags)" for an extra-tags-only rollback (no plain
+    image_tag), mirroring `_build_manifest_context`'s display_name fallback.
+
+    Pure function.
+    """
+    return f"⏪ ROLLBACK {helm_chart} → {image_tag or '(extra-tags)'}"
+
+
 def wave_release_search_link(
     repo_full_name: str,
     helm_chart: str,

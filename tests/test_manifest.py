@@ -322,3 +322,40 @@ class TestIsManifestV1:
 
     def test_rejects_source_pr_author_int(self):
         assert is_manifest_v1(_valid_manifest(sourcePrAuthor=5)) is False
+
+
+# ---------------------------------------------------------------------------
+# imageTag / extraTags — additive optional fields on ALL strategies (ST-4277 §3.2)
+# ---------------------------------------------------------------------------
+
+def test_build_manifest_carries_image_tag_and_extra_tags():
+    m = build_manifest(app="c", instance_id="i", display_name="d", waves={0: 1},
+                       image_tag="production-1.2.3", extra_tags=[{"path": "a.b", "value": "1"}])
+    assert m["imageTag"] == "production-1.2.3"
+    assert m["extraTags"] == ["a.b=1"]
+
+
+def test_build_manifest_omits_absent_tags():
+    m = build_manifest(app="c", instance_id="i", display_name="d", waves={0: 1})
+    assert "imageTag" not in m
+    assert "extraTags" not in m
+
+
+def test_build_manifest_omits_empty_tags():
+    m = build_manifest(app="c", instance_id="i", display_name="d", waves={0: 1},
+                       image_tag="", extra_tags=[])
+    assert "imageTag" not in m
+    assert "extraTags" not in m
+
+
+def test_build_manual_manifest_carries_image_tag_and_extra_tags():
+    m = build_manual_manifest(app="c", instance_id="i", display_name="d", members=[10, 11],
+                              image_tag="production-1.2.3", extra_tags=[{"path": "a.b", "value": "1"}])
+    assert m["imageTag"] == "production-1.2.3"
+    assert m["extraTags"] == ["a.b=1"]
+
+
+def test_build_manual_manifest_omits_absent_tags():
+    m = build_manual_manifest(app="c", instance_id="i", display_name="d", members=[10, 11])
+    assert "imageTag" not in m
+    assert "extraTags" not in m

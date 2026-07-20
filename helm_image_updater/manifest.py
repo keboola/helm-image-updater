@@ -70,6 +70,30 @@ def compute_instance_id(
     return f"{_machine_safe(app)}-{'-'.join(parts)}"
 
 
+def compute_rollback_instance_id(
+    app: str,
+    image_tag: str,
+    extra_tags: Optional[List[Dict[str, str]]],
+    run_id: str,
+) -> str:
+    """ST-4277: ``<app>-rollback-<payload signature>-<gha run id>``.
+
+    The ``rollback`` token and the run-id suffix keep this DISTINCT from the ST-4190
+    ``<app>-<signature>`` id of the ORIGINAL release (a duplicate instanceId would deadlock
+    the promoter's Conflicted guard) while staying unique per dispatch. A re-run of the SAME
+    workflow run (same ``run_id``) yields the SAME id (idempotent, per §3.1); a fresh
+    dispatch (new ``run_id``) gets a new one.
+
+    Reuses `compute_instance_id`'s signature-folding logic (tag + extras -> ``path=value``)
+    so the payload portion matches exactly; only the app prefix is stripped and replaced
+    with the ``-rollback-`` marker.
+    """
+    base = compute_instance_id(app, None, image_tag, extra_tags)  # "<machine_safe(app)>-<sig>"
+    safe_app = _machine_safe(app)
+    sig = base[len(safe_app) + 1:]
+    return f"{safe_app}-rollback-{sig}-{_machine_safe(str(run_id))}"
+
+
 def build_manifest(
     *,
     app: str,
@@ -79,6 +103,8 @@ def build_manifest(
     source_sha: Optional[str] = None,
     source_pr: Optional[str] = None,
     source_pr_author: Optional[str] = None,
+    image_tag: str = "",
+    extra_tags: Optional[List[Dict[str, str]]] = None,
 ) -> Dict[str, Any]:
     """Build the v1 manifest object. `waves` maps wave number -> PR number."""
     manifest: Dict[str, Any] = {
@@ -95,6 +121,10 @@ def build_manifest(
         manifest["sourcePr"] = source_pr
     if source_pr_author:
         manifest["sourcePrAuthor"] = source_pr_author
+    if image_tag:
+        manifest["imageTag"] = image_tag
+    if extra_tags:
+        manifest["extraTags"] = [f"{t['path']}={t['value']}" for t in extra_tags]
     return manifest
 
 
@@ -107,6 +137,8 @@ def build_manual_manifest(
     source_sha: Optional[str] = None,
     source_pr: Optional[str] = None,
     source_pr_author: Optional[str] = None,
+    image_tag: str = "",
+    extra_tags: Optional[List[Dict[str, str]]] = None,
 ) -> Dict[str, Any]:
     """Build the manual-per-stack (ST-4157) v1 manifest: a flat member set, NO waves.
     `members` are the member PR numbers (sorted for determinism; anchor = min)."""
@@ -124,6 +156,10 @@ def build_manual_manifest(
         manifest["sourcePr"] = source_pr
     if source_pr_author:
         manifest["sourcePrAuthor"] = source_pr_author
+    if image_tag:
+        manifest["imageTag"] = image_tag
+    if extra_tags:
+        manifest["extraTags"] = [f"{t['path']}={t['value']}" for t in extra_tags]
     return manifest
 
 
