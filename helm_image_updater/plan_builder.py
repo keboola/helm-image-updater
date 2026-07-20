@@ -588,7 +588,11 @@ def _build_manifest_context(plan: UpdatePlan, config: Optional[EnvironmentConfig
             os.getenv("GITHUB_RUN_ID", "local"),
         )
     else:
-        display_name = f"{plan.helm_chart}@{plan.image_tag}"
+        # ST-4277: use build_tag_string (the same chart+tags renderer the PR title +
+        # release-search link use) rather than a hand-built `<app>@<tag>` — the latter
+        # produced a truncated `<app>@` for an extra-tags-only deploy (empty image_tag),
+        # dropping the extra tags from the promoter's Slack notifications.
+        display_name = build_tag_string(plan.helm_chart, plan.image_tag, plan.extra_tags)
         instance_id = compute_instance_id(plan.helm_chart, source_sha, plan.image_tag, plan.extra_tags)
 
     return {

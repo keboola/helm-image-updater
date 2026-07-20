@@ -287,7 +287,9 @@ def test_non_rollback_manifest_context_carries_image_tag_and_extra_tags():
 
     assert ctx["image_tag"] == "production-abc"
     assert ctx["extra_tags"] == [{"path": "a.b", "value": "1"}]
-    assert ctx["display_name"] == "connection@production-abc"  # unchanged non-rollback shape
+    # ST-4277: display_name now uses build_tag_string, so extra tags appear too
+    # (was "connection@production-abc", which dropped the extra tags — the bug fixed here).
+    assert ctx["display_name"] == "connection@production-abc a.b@1"
 
 
 # --- (d) zero-diff: rollback-specific error mentions promoter:abandon-release -----

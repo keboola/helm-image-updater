@@ -351,6 +351,37 @@ def test_build_manifest_context_no_source():
     assert ctx["instance_id"] == ctx2["instance_id"]
 
 
+def test_build_manifest_context_extra_tags_only_display_name():
+    """ST-4277 bugfix: an extra-tags-only deploy (empty image_tag) must NOT render a
+    truncated `<app>@` display_name that drops the extra tags — the promoter posts
+    displayName verbatim into Slack ("Release job-queue-daemon@ complete"). Use
+    build_tag_string so the extra tags appear, matching the PR title + search link."""
+    plan = Mock()
+    plan.helm_chart = "job-queue-daemon"
+    plan.image_tag = ""
+    plan.extra_tags = [{"path": "jobqueuelogshandlerimage.tag", "value": "production-900c37b"}]
+    plan.metadata = {"source": {}}
+
+    ctx = _build_manifest_context(plan)
+
+    assert ctx["display_name"] == "job-queue-daemon jobqueuelogshandlerimage.tag@production-900c37b"
+    assert not ctx["display_name"].endswith("@")
+
+
+def test_build_manifest_context_image_tag_plus_extra_tags_display_name():
+    """A deploy carrying BOTH an image tag and extra tags shows both (previously the
+    extra tags were dropped from display_name entirely)."""
+    plan = Mock()
+    plan.helm_chart = "connection"
+    plan.image_tag = "production-abc"
+    plan.extra_tags = [{"path": "sidecar.tag", "value": "1.2.3"}]
+    plan.metadata = {"source": {}}
+
+    ctx = _build_manifest_context(plan)
+
+    assert ctx["display_name"] == "connection@production-abc sidecar.tag@1.2.3"
+
+
 # ---------------------------------------------------------------------------
 # (4b) Composition test: _build_manifest_context instance_id matches
 #      compute_instance_id; and _guard_release_not_already_open matches on it.
