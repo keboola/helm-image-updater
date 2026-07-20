@@ -239,6 +239,28 @@ def test_rollback_pr_body_omits_reason_when_absent():
     assert "**Reason:**" not in pr_plan.pr_body
 
 
+def test_rollback_pr_body_omits_wave_search_link():
+    """ST-4277 (Copilot review r3613187991): the 'All wave PRs' search link quotes
+    build_tag_string, which the ⏪ ROLLBACK title does NOT embed — so the quoted-phrase
+    search would never match the rollback PR (and could match the ORIGINAL release's wave
+    PRs, which DO embed chart@tag). A rollback is a single wave-0 PR anyway, so an
+    'all waves' link is meaningless. Skip it for rollback."""
+    plan = _rollback_plan()
+    config = _rollback_config()
+    pr_group = {
+        "stacks": ["dev1", "prod1", "prod2"],
+        "changes": [_stack_change(s) for s in ["dev1", "prod1", "prod2"]],
+        "base_branch": "main",
+        "pr_type": "wave",
+        "wave_number": 0,
+        "labels": [wave_label(0), deploy_label(DeployStrategy.ROLLBACK)],
+    }
+    pr_plan = _create_pr_plan(pr_group, plan, config)
+
+    assert "All wave PRs of this release" not in pr_plan.pr_body
+    assert "/pulls?q=" not in pr_plan.pr_body
+
+
 # --- (c) manifest context: rollback display_name/instance_id + image_tag/extra_tags
 
 

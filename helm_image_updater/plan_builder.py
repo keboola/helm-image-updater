@@ -832,7 +832,11 @@ def _create_pr_plan(pr_group: Dict[str, Any], plan: UpdatePlan, config: Environm
     # Wave PRs: link a PR search that finds every wave PR of this release. The link
     # quotes the full chart+tags string (incl. extra tags), which every wave PR title
     # embeds verbatim (see build_tag_string above); no PR numbers needed.
-    if pr_type == 'wave':
+    # ST-4277: NOT for rollback — its title is `⏪ ROLLBACK <chart> → <tag>`, which does
+    # NOT embed build_tag_string, so the quoted-phrase search would never match the
+    # rollback PR (and could match the ORIGINAL release's wave PRs). A rollback is a
+    # single wave-0 PR anyway, so an "all waves" link is meaningless.
+    if pr_type == 'wave' and config.deploy_strategy != DeployStrategy.ROLLBACK:
         search_link = wave_release_search_link(
             GITHUB_REPO, plan.helm_chart, plan.image_tag, plan.extra_tags
         )
