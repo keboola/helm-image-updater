@@ -321,6 +321,119 @@ class TestCheckAndRemoveOverride:
         result = _check_and_remove_override("dev-stack", "my-chart", mock_io)
         assert result is None
 
+    # --- Byte-for-byte preservation (regression for kbc-stacks#24324) ---
+    # HIU must only drop the override line(s). Re-serializing the whole document
+    # through ruamel reformatted unrelated lines (list indent, aligned values,
+    # trailing whitespace), which the release promoter flags as `conflicted`.
+
+    REAL_VALUES = (
+        'image:\n'
+        '  repository: keboola-prod-artifacts/keboola-operator/keboola-operator\n'
+        '\n'
+        'config:\n'
+        '  e2b:\n'
+        '    sandboxTimeout: "1h"\n'
+        '\n'
+        '  kaiSandbox:\n'
+        '    egress:\n'
+        '      # Public GKE control-plane endpoint, allocated per cluster; the private\n'
+        '      # endpoint is already denied.\n'
+        '      denyCidrs:\n'
+        '        - "35.232.231.105/32"\n'
+        '\n'
+        'runtimeDefaults:\n'
+        '  dbt:             "4.6.0-1.8.6"\n'
+        '  python:          "7.1.1"\n'
+        'args:\n'
+        '  - "--host" \n'
+        '  - "0.0.0.0"\n'
+        'argocdApplication:\n'
+        '  appManifestsRevision: pepa/PAT-2093_appsproxy-sandboxes-rbac\n'
+    )
+
+    def test_removes_only_override_lines_preserving_all_other_bytes(self):
+        """Regression: only the two override lines are removed; every other byte is intact
+        (indented list dash, aligned values, trailing whitespace, comments, blank lines)."""
+        mock_io = Mock()
+        mock_io.read_file.return_value = self.REAL_VALUES
+
+        result = _check_and_remove_override("dev-stack", "keboola-operator", mock_io)
+
+        assert result is not None
+        expected = self.REAL_VALUES.replace(
+            'argocdApplication:\n'
+            '  appManifestsRevision: pepa/PAT-2093_appsproxy-sandboxes-rbac\n',
+            '',
+        )
+        assert result.new_content == expected
+
+    def test_override_block_at_top_of_file_removed_textually(self):
+        """Canary-style layout: block at the top, other keys below. Only the two lines go."""
+        mock_io = Mock()
+        mock_io.read_file.return_value = (
+            'argocdApplication:\n'
+            '  appManifestsRevision: canary-orion\n'
+            '\n'
+            'workers:\n'
+            '  replicas: 2\n'
+        )
+
+        result = _check_and_remove_override("dev-stack", "my-chart", mock_io)
+
+        assert result is not None
+        assert result.new_content == '\nworkers:\n  replicas: 2\n'
+
+    def test_keeps_parent_block_and_siblings_textually(self):
+        """When argocdApplication has other children, only the revision line is removed."""
+        mock_io = Mock()
+        mock_io.read_file.return_value = (
+            'argocdApplication:\n'
+            '  syncPolicy: automated\n'
+            '  appManifestsRevision: feature-x\n'
+            'image:\n'
+            '  tag: 1 \n'
+        )
+
+        result = _check_and_remove_override("dev-stack", "my-chart", mock_io)
+
+        assert result is not None
+        assert result.new_content == (
+            'argocdApplication:\n'
+            '  syncPolicy: automated\n'
+            'image:\n'
+            '  tag: 1 \n'
+        )
+
+    def test_trailing_comments_on_override_lines(self):
+        """Inline comments on the override lines don't break detection; unrelated lines untouched."""
+        mock_io = Mock()
+        mock_io.read_file.return_value = (
+            'image:\n'
+            '  tag:   1\n'
+            'argocdApplication: # temporary\n'
+            '  appManifestsRevision: feature-x  # until merged\n'
+        )
+
+        result = _check_and_remove_override("dev-stack", "my-chart", mock_io)
+
+        assert result is not None
+        assert result.new_content == 'image:\n  tag:   1\n'
+
+    def test_flow_style_override_is_skipped_with_warning(self, capsys):
+        """A layout the textual remover doesn't understand is skipped loudly, never rewritten
+        via a full re-serialization."""
+        mock_io = Mock()
+        mock_io.read_file.return_value = (
+            'image:\n'
+            '  tag: 1\n'
+            'argocdApplication: {appManifestsRevision: feature-x}\n'
+        )
+
+        result = _check_and_remove_override("dev-stack", "my-chart", mock_io)
+
+        assert result is None
+        assert "Warning" in capsys.readouterr().out
+
 
 class TestOverrideIntegration:
     """Integration tests for override removal in the full plan flow."""
