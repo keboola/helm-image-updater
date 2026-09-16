@@ -1,6 +1,7 @@
 """Plan builder - creates an execution plan from configuration."""
 
 import os
+import re
 from io import StringIO
 from typing import List, Dict, Any, Optional
 
@@ -376,18 +377,18 @@ def _check_and_remove_override(
     if not revision or revision == "main":
         return None
 
-    del values_data["argocdApplication"]["appManifestsRevision"]
-
-    # If argocdApplication is now empty, remove the entire block
-    if not values_data["argocdApplication"]:
-        del values_data["argocdApplication"]
-
-    if values_data:
-        stream = StringIO()
-        _ryaml.dump(values_data, stream)
-        new_content = stream.getvalue()
-    else:
-        new_content = ""
+    # Remove the override TEXTUALLY. Re-serializing the whole document through ruamel
+    # reformats unrelated lines (sequence indent, aligned values, trailing whitespace),
+    # which the release promoter rejects as a `conflicted` release (kbc-stacks#24324).
+    # ruamel above is used only to validate the YAML and detect the override.
+    new_content = _remove_override_lines(values_content)
+    if new_content is None:
+        print(
+            f"Warning: found appManifestsRevision override ({revision}) in {values_file_path} "
+            "but could not locate a block-style `argocdApplication:` / `appManifestsRevision:` "
+            "line pair; leaving the file untouched"
+        )
+        return None
 
     print(f"Detected appManifestsRevision override ({revision}) in {values_file_path}, will remove it")
 
@@ -397,6 +398,51 @@ def _check_and_remove_override(
         new_content=new_content,
         change_description=f"Removed appManifestsRevision override ({revision}) from {values_file_path}",
     )
+
+
+_ARGOCD_KEY_RE = re.compile(r"^argocdApplication\s*:\s*(#.*)?$")
+_REVISION_KEY_RE = re.compile(r"^\s+appManifestsRevision\s*:")
+
+
+def _remove_override_lines(content: str) -> Optional[str]:
+    """Drop the `appManifestsRevision:` line under a top-level block-style `argocdApplication:`
+    key, and the parent key too when nothing else is left under it. Every other byte of
+    `content` is preserved. Mirrors `patchRevisionInText` in the kbc-stacks fork-app CLI,
+    which writes these overrides.
+
+    Returns None when the expected line pair can't be found (e.g. flow style
+    `argocdApplication: {appManifestsRevision: x}`); callers must then leave the file alone.
+    """
+    lines = content.splitlines(keepends=True)
+
+    argocd_idx = next(
+        (i for i, line in enumerate(lines) if _ARGOCD_KEY_RE.match(line.rstrip("\r\n"))),
+        -1,
+    )
+    if argocd_idx == -1:
+        return None
+
+    revision_idx = -1
+    has_other_children = False
+    for j in range(argocd_idx + 1, len(lines)):
+        line = lines[j]
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if not line[0].isspace():
+            break  # back at top level: block ended
+        if _REVISION_KEY_RE.match(line):
+            revision_idx = j
+        else:
+            has_other_children = True
+
+    if revision_idx == -1:
+        return None
+
+    to_remove = {revision_idx}
+    if not has_other_children:
+        to_remove.add(argocd_idx)
+    return "".join(line for i, line in enumerate(lines) if i not in to_remove)
 
 
 def calculate_tag_changes(
