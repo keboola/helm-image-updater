@@ -13,7 +13,10 @@ _ryaml.preserve_quotes = True
 
 from .models import UpdatePlan, FileChange, PRPlan, UpdateStrategy, TagChange, DeployStrategy
 from .wave_planning import wave_label, deploy_label, resolve_wave
-from .manifest import compute_instance_id, extract_instance_id, compute_rollback_instance_id
+from .manifest import (
+    compute_instance_id, extract_instance_id, compute_rollback_instance_id,
+    notify_thread_from_metadata,
+)
 from .environment import EnvironmentConfig
 from .io_layer import IOLayer
 from .tag_classification import detect_tag_type, TagType
@@ -650,7 +653,25 @@ def _build_manifest_context(plan: UpdatePlan, config: Optional[EnvironmentConfig
         "source_pr_author": source_pr_author or None,
         "image_tag": plan.image_tag,
         "extra_tags": plan.extra_tags,
+        "notify_thread": _resolve_notify_thread(plan.metadata),
     }
+
+
+def _resolve_notify_thread(metadata: Any) -> Optional[Dict[str, str]]:
+    """Validated Slack thread reference for the manifest (DMD-2418), or None.
+
+    The metadata is untrusted: an invalid reference is dropped with a warning that never
+    echoes its value (it could carry GitHub Actions workflow commands), and the deploy
+    continues unchanged.
+    """
+    notify_thread = notify_thread_from_metadata(metadata)
+    if notify_thread is not None:
+        print(f"Slack thread reference accepted for the release manifest "
+              f"(channel {notify_thread['slackChannel']}, thread {notify_thread['threadTs']})")
+    elif isinstance(metadata, dict) and "notify" in metadata:
+        print("Warning: ignoring missing or malformed notify.slack thread reference in metadata; "
+              "the release manifest is written without notifyThread")
+    return notify_thread
 
 
 def _group_changes_by_wave(stack_changes, plan, config, io_layer):
