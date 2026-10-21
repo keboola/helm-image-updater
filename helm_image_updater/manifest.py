@@ -247,8 +247,9 @@ def is_manifest_v1(x: Any) -> bool:
     for opt in ("sourceSha", "sourcePr", "sourcePrAuthor"):
         if opt in x and not isinstance(x[opt], str):
             return False
-    # notifyThread is deliberately NOT checked: the promoter drops an invalid value and keeps
-    # the manifest valid (DMD-2423), because a notification must never halt a deploy.
+    # notifyThread is deliberately NOT checked: per the DMD-2423 contract an invalid value is
+    # dropped, never a reason to reject the manifest, because a notification must never halt
+    # a deploy.
     # mode discriminator (ST-4157): "manual-per-stack" ⇒ flat members set, NO waves.
     # A manual manifest carrying wave fields is a contradictory shape → reject.
     mode = x.get("mode")

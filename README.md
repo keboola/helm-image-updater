@@ -289,7 +289,7 @@ An **explicit** `DEPLOY_STRATEGY=rollback` on a **production/semver** tag emits 
 
 ### Slack thread reference (optional)
 
-When the trigger metadata carries `notify.slack = {channel_id, thread_ts}` (set by kbc-stacks `trigger-image-tag-update` from the CI build message), every promoter-managed release manifest gets `notifyThread: {slackChannel, threadTs}`, so [release-promoter](https://github.com/keboola/release-promoter) can post rollout progress into that Slack thread. The metadata is untrusted: the field is written only when `channel_id` matches `^C[A-Z0-9]{8,32}$` and `thread_ts` matches `^[0-9]{10}\.[0-9]{6}$`. Otherwise it is omitted with a warning that never echoes the value, and the deploy is otherwise unchanged. A manifest without the reference is identical to one built without `notify` metadata. The channel allowlist is enforced by release-promoter, not here.
+When the trigger metadata carries `notify.slack = {channel_id, thread_ts}` (set by kbc-stacks `trigger-image-tag-update` from the CI build message), every promoter-managed release manifest gets `notifyThread: {slackChannel, threadTs}`, so [release-promoter](https://github.com/keboola/release-promoter) can post rollout progress into that Slack thread. The metadata is untrusted: the field is written only when `channel_id` matches `^C[A-Z0-9]{8,32}$` and `thread_ts` matches `^[0-9]{10}\.[0-9]{6}$`. Otherwise the field is omitted (with a warning that never echoes the value when a `notify` key is present), and the deploy is otherwise unchanged. A manifest without the reference is identical to one built without `notify` metadata. The channel allowlist is enforced by release-promoter, not here.
 
 ## Releasing
 

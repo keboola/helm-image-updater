@@ -457,3 +457,30 @@ def test_prepare_plan_invalid_slack_thread_does_not_change_the_deploy(std_stacks
     assert bad.manifest_context == plain.manifest_context
     assert [(p.wave_number, p.labels, p.auto_merge, p.files_to_commit) for p in bad.pr_plans] == \
            [(p.wave_number, p.labels, p.auto_merge, p.files_to_commit) for p in plain.pr_plans]
+
+
+def test_metadata_slack_thread_reaches_the_written_anchor_manifest(std_stacks):
+    """prepare_plan's context and the executor agree end to end: the anchor body gets notifyThread."""
+    import json
+    import re
+    from unittest.mock import MagicMock
+    from helm_image_updater.plan_executor import execute_plan
+
+    os.chdir(std_stacks["base_dir"])
+    config = EnvironmentConfig.from_env(_std_env_with_metadata(std_stacks["base_dir"], {
+        "source": {"sha": "deadbeef0123abc"},
+        "notify": {"slack": {"channel_id": "C055RTFCJ6M", "thread_ts": "1760950000.123456"}},
+    }))
+    plan = prepare_plan(config, _io_layer())
+    # Planned in dry-run (no idempotency guard I/O); executed for real against a mock IO layer.
+    plan.dry_run = False
+
+    io = MagicMock()
+    io.create_branch_commit_and_pr.side_effect = [
+        f"https://github.com/keboola/kbc-stacks/pull/{20 + i}" for i in range(len(plan.pr_plans))
+    ]
+    execute_plan(plan, io)
+
+    (_, body), _ = io.update_pull_request_body.call_args
+    manifest = json.loads(re.findall(r"```json\r?\n(.*?)```", body, re.DOTALL)[0])
+    assert manifest["notifyThread"] == {"slackChannel": "C055RTFCJ6M", "threadTs": "1760950000.123456"}
