@@ -506,3 +506,49 @@ def test_non_wave_pr_body_has_no_release_search_link():
         pr_plan = _create_pr_plan(group, plan, config)
     assert "All wave PRs of this release" not in pr_plan.pr_body
     assert "### Release\n" not in pr_plan.pr_body
+
+
+# ---------------------------------------------------------------------------
+# notify_thread in the manifest context (DMD-2428)
+# ---------------------------------------------------------------------------
+
+def _context_plan(metadata):
+    plan = Mock()
+    plan.helm_chart = "connection"
+    plan.image_tag = "production-abc"
+    plan.extra_tags = None
+    plan.metadata = metadata
+    return plan
+
+
+def test_manifest_context_carries_valid_notify_thread(capsys):
+    plan = _context_plan({"source": {"sha": "abc"},
+                          "notify": {"slack": {"channel_id": "C055RTFCJ6M",
+                                               "thread_ts": "1760950000.123456"}}})
+
+    ctx = _build_manifest_context(plan)
+
+    assert ctx["notify_thread"] == {"slackChannel": "C055RTFCJ6M", "threadTs": "1760950000.123456"}
+    assert "Slack thread reference accepted" in capsys.readouterr().out
+
+
+def test_manifest_context_notify_thread_none_and_silent_when_absent(capsys):
+    ctx = _build_manifest_context(_context_plan({"source": {"sha": "abc"}}))
+
+    assert ctx["notify_thread"] is None
+    assert "thread reference" not in capsys.readouterr().out
+
+
+def test_manifest_context_drops_invalid_notify_thread_without_echoing_it(capsys):
+    hostile = "::error::pwned$(id)"
+    plan = _context_plan({"source": {"sha": "abc"},
+                          "notify": {"slack": {"channel_id": hostile, "thread_ts": hostile}}})
+
+    ctx = _build_manifest_context(plan)
+
+    assert ctx["notify_thread"] is None
+    out = capsys.readouterr().out
+    assert "Warning: ignoring missing or malformed notify.slack" in out
+    assert hostile not in out
+    # The rest of the identity is unaffected by the dropped reference.
+    assert ctx["instance_id"] == "connection-production-abc"

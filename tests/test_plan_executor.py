@@ -3,6 +3,7 @@ import json, re
 from unittest.mock import MagicMock
 from helm_image_updater.models import UpdatePlan, PRPlan, FileChange, UpdateStrategy
 from helm_image_updater.plan_executor import execute_plan
+from helm_image_updater.manifest import extract_instance_id
 
 JSON_FENCE_RE = re.compile(r"```json\r?\n(.*?)```", re.DOTALL)
 
@@ -177,6 +178,53 @@ def test_executor_manual_manifest_includes_image_tag_and_extra_tags():
     manifest = json.loads(JSON_FENCE_RE.findall(new_body)[0])
     assert manifest["imageTag"] == "production-abc"
     assert manifest["extraTags"] == ["foo.bar=baz"]
+
+
+_NOTIFY_THREAD = {"slackChannel": "C055RTFCJ6M", "threadTs": "1760950000.123456"}
+
+
+def test_executor_wave_manifest_includes_notify_thread():
+    """DMD-2428: the wave-0 build_manifest call site forwards manifest_context's notify_thread."""
+    plan = _wave_plan()
+    plan.manifest_context["notify_thread"] = dict(_NOTIFY_THREAD)
+    io = MagicMock()
+    io.create_branch_commit_and_pr.side_effect = [
+        f"https://github.com/keboola/kbc-stacks/pull/{10 + w}" for w in range(4)
+    ]
+    execute_plan(plan, io)
+
+    (_, new_body), _ = io.update_pull_request_body.call_args
+    manifest = json.loads(JSON_FENCE_RE.findall(new_body)[0])
+    assert manifest["notifyThread"] == _NOTIFY_THREAD
+    assert extract_instance_id(new_body) == "connection-abc"
+
+
+def test_executor_manual_manifest_includes_notify_thread():
+    """DMD-2428: the manual-per-stack build_manual_manifest call site forwards it too."""
+    plan = _manual_manifest_plan()
+    plan.manifest_context["notify_thread"] = dict(_NOTIFY_THREAD)
+    io = MagicMock()
+    io.create_branch_commit_and_pr.side_effect = [
+        "https://github.com/keboola/kbc-stacks/pull/30",
+        "https://github.com/keboola/kbc-stacks/pull/31",
+    ]
+    execute_plan(plan, io)
+
+    (_, new_body), _ = io.update_pull_request_body.call_args
+    manifest = json.loads(JSON_FENCE_RE.findall(new_body)[0])
+    assert manifest["notifyThread"] == _NOTIFY_THREAD
+
+
+def test_executor_manifest_omits_notify_thread_when_context_lacks_it():
+    plan = _wave_plan()
+    io = MagicMock()
+    io.create_branch_commit_and_pr.side_effect = [
+        f"https://github.com/keboola/kbc-stacks/pull/{10 + w}" for w in range(4)
+    ]
+    execute_plan(plan, io)
+
+    (_, new_body), _ = io.update_pull_request_body.call_args
+    assert "notifyThread" not in json.loads(JSON_FENCE_RE.findall(new_body)[0])
 
 
 def test_executor_no_patch_when_not_wave_mode():

@@ -227,6 +227,7 @@ def _patch_anchor_manifest(plan: UpdatePlan, io_layer: IOLayer, wave_pr_numbers:
         waves=wave_pr_numbers, source_sha=ctx.get("source_sha"), source_pr=ctx.get("source_pr"),
         source_pr_author=ctx.get("source_pr_author"),
         image_tag=ctx.get("image_tag", ""), extra_tags=ctx.get("extra_tags"),
+        notify_thread=ctx.get("notify_thread"),
     )
     links_md = _wave_links_md(wave_pr_numbers)
     new_body = f"{wave0_body}\n\n{links_md}\n\n{manifest_block(manifest)}"
@@ -317,6 +318,7 @@ def _patch_manual_anchor(plan: UpdatePlan, io_layer: IOLayer, manual_pr_numbers:
         members=members, source_sha=ctx.get("source_sha"), source_pr=ctx.get("source_pr"),
         source_pr_author=ctx.get("source_pr_author"),
         image_tag=ctx.get("image_tag", ""), extra_tags=ctx.get("extra_tags"),
+        notify_thread=ctx.get("notify_thread"),
     )
     links_md = _manual_members_md(members, anchor)
     new_body = f"{anchor_body}\n\n{links_md}\n\n{manifest_block(manifest)}"

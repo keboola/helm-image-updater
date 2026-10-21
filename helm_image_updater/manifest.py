@@ -27,6 +27,13 @@ _WAVE_KEY_RE = re.compile(r"^(0|[1-9]\d*)\Z")
 _JSON_FENCE_RE = re.compile(r"```json\r?\n(.*?)```", re.DOTALL)
 # Chars forbidden in an instanceId (the complement of INSTANCE_ID_RE's class).
 _UNSAFE_RE = re.compile(r"[\s:@]")
+# Promoter's notifyThread formats (DMD-2423). Explicit ASCII classes because Python's \d
+# also matches non-ASCII digits; \Z for the exact-JS end-of-string semantics (see above).
+# The channel length cap is HIU-only (Slack IDs are ~11 chars): an unbounded untrusted value
+# could push the anchor body past GitHub's size limit and fail the manifest write. Being
+# stricter than the promoter only drops the field.
+_SLACK_CHANNEL_RE = re.compile(r"^C[A-Z0-9]{8,32}\Z")
+_THREAD_TS_RE = re.compile(r"^[0-9]{10}\.[0-9]{6}\Z")
 
 
 def _machine_safe(app: str) -> str:
@@ -94,6 +101,40 @@ def compute_rollback_instance_id(
     return f"{safe_app}-rollback-{sig}-{_machine_safe(str(run_id))}"
 
 
+def is_valid_notify_thread(v: Any) -> bool:
+    """notifyThread: ``{slackChannel, threadTs}`` in the promoter's formats (DMD-2423)."""
+    if not isinstance(v, dict):
+        return False
+    channel = v.get("slackChannel")
+    ts = v.get("threadTs")
+    return (
+        isinstance(channel, str) and _SLACK_CHANNEL_RE.match(channel) is not None
+        and isinstance(ts, str) and _THREAD_TS_RE.match(ts) is not None
+    )
+
+
+def notify_thread_from_metadata(metadata: Any) -> Optional[Dict[str, str]]:
+    """Map the untrusted ``metadata.notify.slack.{channel_id, thread_ts}`` (set by kbc-stacks
+    trigger-image-tag-update) to a manifest ``notifyThread``, or None when it is absent or
+    malformed. Never raises: a Slack thread reference must never fail or change a deploy."""
+    notify = metadata.get("notify") if isinstance(metadata, dict) else None
+    slack = notify.get("slack") if isinstance(notify, dict) else None
+    if not isinstance(slack, dict):
+        return None
+    candidate = {"slackChannel": slack.get("channel_id"), "threadTs": slack.get("thread_ts")}
+    return candidate if is_valid_notify_thread(candidate) else None
+
+
+def _add_notify_thread(manifest: Dict[str, Any], notify_thread: Optional[Dict[str, str]]) -> None:
+    """Append notifyThread as the LAST key, only when valid, so a manifest without it stays
+    byte-identical. Copies only the two contract keys."""
+    if notify_thread is not None and is_valid_notify_thread(notify_thread):
+        manifest["notifyThread"] = {
+            "slackChannel": notify_thread["slackChannel"],
+            "threadTs": notify_thread["threadTs"],
+        }
+
+
 def build_manifest(
     *,
     app: str,
@@ -105,6 +146,7 @@ def build_manifest(
     source_pr_author: Optional[str] = None,
     image_tag: str = "",
     extra_tags: Optional[List[Dict[str, str]]] = None,
+    notify_thread: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """Build the v1 manifest object. `waves` maps wave number -> PR number."""
     manifest: Dict[str, Any] = {
@@ -125,6 +167,7 @@ def build_manifest(
         manifest["imageTag"] = image_tag
     if extra_tags:
         manifest["extraTags"] = [f"{t['path']}={t['value']}" for t in extra_tags]
+    _add_notify_thread(manifest, notify_thread)
     return manifest
 
 
@@ -139,6 +182,7 @@ def build_manual_manifest(
     source_pr_author: Optional[str] = None,
     image_tag: str = "",
     extra_tags: Optional[List[Dict[str, str]]] = None,
+    notify_thread: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """Build the manual-per-stack (ST-4157) v1 manifest: a flat member set, NO waves.
     `members` are the member PR numbers (sorted for determinism; anchor = min)."""
@@ -160,6 +204,7 @@ def build_manual_manifest(
         manifest["imageTag"] = image_tag
     if extra_tags:
         manifest["extraTags"] = [f"{t['path']}={t['value']}" for t in extra_tags]
+    _add_notify_thread(manifest, notify_thread)
     return manifest
 
 
@@ -202,6 +247,9 @@ def is_manifest_v1(x: Any) -> bool:
     for opt in ("sourceSha", "sourcePr", "sourcePrAuthor"):
         if opt in x and not isinstance(x[opt], str):
             return False
+    # notifyThread is deliberately NOT checked: per the DMD-2423 contract an invalid value is
+    # dropped, never a reason to reject the manifest, because a notification must never halt
+    # a deploy.
     # mode discriminator (ST-4157): "manual-per-stack" ⇒ flat members set, NO waves.
     # A manual manifest carrying wave fields is a contradictory shape → reject.
     mode = x.get("mode")

@@ -5,6 +5,7 @@ import pytest
 from helm_image_updater.manifest import (
     compute_instance_id, build_manifest, build_manual_manifest, manifest_block,
     extract_instance_id, is_manifest_v1, MANIFEST_HEADING,
+    is_valid_notify_thread, notify_thread_from_metadata,
 )
 
 # Mirror the promoter's regexes with exact-JS semantics.
@@ -359,3 +360,173 @@ def test_build_manual_manifest_omits_absent_tags():
     m = build_manual_manifest(app="c", instance_id="i", display_name="d", members=[10, 11])
     assert "imageTag" not in m
     assert "extraTags" not in m
+
+
+# ---------------------------------------------------------------------------
+# notifyThread — optional Slack thread reference from untrusted metadata (DMD-2428)
+# ---------------------------------------------------------------------------
+
+_CHANNEL = "C055RTFCJ6M"
+_TS = "1760950000.123456"
+_NOTIFY_THREAD = {"slackChannel": _CHANNEL, "threadTs": _TS}
+
+
+def _metadata_with_slack(**slack):
+    return {"source": {"sha": "abc"}, "notify": {"slack": slack}}
+
+
+def test_notify_thread_from_metadata_valid():
+    md = _metadata_with_slack(channel_id=_CHANNEL, thread_ts=_TS)
+    assert notify_thread_from_metadata(md) == _NOTIFY_THREAD
+
+
+def test_notify_thread_from_metadata_ignores_extra_slack_keys():
+    md = _metadata_with_slack(channel_id=_CHANNEL, thread_ts=_TS, other="x")
+    assert notify_thread_from_metadata(md) == _NOTIFY_THREAD
+
+
+@pytest.mark.parametrize("metadata", [
+    None, {}, [], "notify", 42,
+    {"source": {"sha": "abc"}},
+    {"notify": None}, {"notify": []}, {"notify": "slack"}, {"notify": {}},
+    {"notify": {"slack": None}}, {"notify": {"slack": [_CHANNEL, _TS]}},
+    {"notify": {"slack": "C055RTFCJ6M/1760950000.123456"}},
+])
+def test_notify_thread_from_metadata_absent_or_wrong_shape(metadata):
+    assert notify_thread_from_metadata(metadata) is None
+
+
+@pytest.mark.parametrize("slack", [
+    {"channel_id": _CHANNEL},
+    {"thread_ts": _TS},
+    {"channel_id": None, "thread_ts": _TS},
+    {"channel_id": _CHANNEL, "thread_ts": 1760950000.123456},
+    {"channel_id": 55, "thread_ts": _TS},
+    {"channel_id": [_CHANNEL], "thread_ts": _TS},
+])
+def test_notify_thread_from_metadata_missing_or_non_string_fields(slack):
+    assert notify_thread_from_metadata({"notify": {"slack": slack}}) is None
+
+
+@pytest.mark.parametrize("channel", [
+    "", "C", "C1234567",             # too short
+    "G055RTFCJ6M", "D055RTFCJ6M",    # not a public-channel id
+    "c055rtfcj6m", "C055rtfcj6m",    # lowercase
+    "C055RTFCJ6M\n", " C055RTFCJ6M", "C055RTFCJ6M ",
+    "C055RTFCJ6M::warning::x", "C055RTFC$(id)", "C055RTFCJ6M;rm",
+    "C055RTFCJ6M١",             # non-ASCII digit
+    "#team_connection_signed_off_deploys",
+    "C" + "A" * 33,                  # over the HIU length cap
+    "C" + "A" * 70000,               # would overflow the PR body limit
+])
+def test_notify_thread_from_metadata_rejects_bad_channel(channel):
+    assert notify_thread_from_metadata(_metadata_with_slack(channel_id=channel, thread_ts=_TS)) is None
+
+
+@pytest.mark.parametrize("ts", [
+    "", "1760950000", "1760950000.", "1760950000123456",
+    "176095000.123456", "17609500000.123456",   # 9 / 11 integer digits
+    "1760950000.12345", "1760950000.1234567",   # 5 / 7 fraction digits
+    "1760950000.123456\n", " 1760950000.123456",
+    "1760950000,123456", "-760950000.123456",
+    "١760950000.123456",                   # non-ASCII digit
+    "1760950000.123456::warning::x",
+])
+def test_notify_thread_from_metadata_rejects_bad_thread_ts(ts):
+    assert notify_thread_from_metadata(_metadata_with_slack(channel_id=_CHANNEL, thread_ts=ts)) is None
+
+
+def test_is_valid_notify_thread():
+    assert is_valid_notify_thread(_NOTIFY_THREAD) is True
+    assert is_valid_notify_thread({"slackChannel": "C" + "A" * 32, "threadTs": _TS}) is True
+    assert is_valid_notify_thread(dict(_NOTIFY_THREAD, extra="x")) is True
+    assert is_valid_notify_thread(None) is False
+    assert is_valid_notify_thread({"slackChannel": _CHANNEL}) is False
+    assert is_valid_notify_thread({"slackChannel": _CHANNEL, "threadTs": 1}) is False
+
+
+def test_build_manifest_writes_notify_thread_last():
+    m = build_manifest(app="c", instance_id="i", display_name="d", waves={0: 1},
+                       source_sha="s", image_tag="production-1", notify_thread=_NOTIFY_THREAD)
+    assert m["notifyThread"] == _NOTIFY_THREAD
+    assert list(m)[-1] == "notifyThread"
+    assert is_manifest_v1(m) is True
+
+
+def test_build_manual_manifest_writes_notify_thread_last():
+    m = build_manual_manifest(app="c", instance_id="i", display_name="d", members=[10, 11],
+                              image_tag="production-1", notify_thread=_NOTIFY_THREAD)
+    assert m["notifyThread"] == _NOTIFY_THREAD
+    assert list(m)[-1] == "notifyThread"
+    assert is_manifest_v1(m) is True
+
+
+def test_build_manifest_copies_only_contract_keys():
+    m = build_manifest(app="c", instance_id="i", display_name="d", waves={0: 1},
+                       notify_thread=dict(_NOTIFY_THREAD, injected="x"))
+    assert m["notifyThread"] == _NOTIFY_THREAD
+
+
+@pytest.mark.parametrize("notify_thread", [
+    None, {}, {"slackChannel": _CHANNEL}, {"slackChannel": "G055RTFCJ6M", "threadTs": _TS},
+])
+def test_builders_omit_absent_or_invalid_notify_thread(notify_thread):
+    m = build_manifest(app="c", instance_id="i", display_name="d", waves={0: 1},
+                       notify_thread=notify_thread)
+    mm = build_manual_manifest(app="c", instance_id="i", display_name="d", members=[10],
+                               notify_thread=notify_thread)
+    assert "notifyThread" not in m
+    assert "notifyThread" not in mm
+
+
+def test_manifest_block_without_notify_thread_is_byte_identical():
+    """Acceptance (DMD-2428): no thread reference -> the rendered manifest is unchanged."""
+    kwargs = dict(app="connection", instance_id="connection-production-abc",
+                  display_name="connection@production-abc", waves={0: 10, 1: 11},
+                  source_sha="abc", source_pr="https://x/pull/1", source_pr_author="zajca",
+                  image_tag="production-abc", extra_tags=[{"path": "a.b", "value": "1"}])
+    expected = (
+        MANIFEST_HEADING + "\n\n```json\n"
+        '{\n'
+        '  "manifestVersion": "v1",\n'
+        '  "instanceId": "connection-production-abc",\n'
+        '  "displayName": "connection@production-abc",\n'
+        '  "app": "connection",\n'
+        '  "anchorWave": 0,\n'
+        '  "waves": {\n'
+        '    "0": 10,\n'
+        '    "1": 11\n'
+        '  },\n'
+        '  "sourceSha": "abc",\n'
+        '  "sourcePr": "https://x/pull/1",\n'
+        '  "sourcePrAuthor": "zajca",\n'
+        '  "imageTag": "production-abc",\n'
+        '  "extraTags": [\n'
+        '    "a.b=1"\n'
+        '  ]\n'
+        '}\n```'
+    )
+    assert manifest_block(build_manifest(**kwargs)) == expected
+    assert manifest_block(build_manifest(**kwargs, notify_thread=None)) == expected
+
+
+@pytest.mark.parametrize("notify_thread", [
+    _NOTIFY_THREAD,
+    {"slackChannel": "G055RTFCJ6M", "threadTs": _TS},
+    {"slackChannel": _CHANNEL},
+    {"slackChannel": 1, "threadTs": 2},
+    "C055RTFCJ6M", [], None, 42,
+])
+def test_is_manifest_v1_never_rejects_on_notify_thread(notify_thread):
+    """The promoter drops an invalid notifyThread instead of rejecting the manifest (DMD-2423):
+    a notification must never halt a deploy, so the HIU mirror must accept it too."""
+    assert is_manifest_v1(_valid_manifest(notifyThread=notify_thread)) is True
+    manual = {"manifestVersion": "v1", "mode": "manual-per-stack", "instanceId": "c-x",
+              "displayName": "d", "app": "c", "members": [10, 11], "notifyThread": notify_thread}
+    assert is_manifest_v1(manual) is True
+
+
+def test_extract_instance_id_reads_manifest_with_notify_thread():
+    m = build_manifest(app="c", instance_id="c-production-1", display_name="d", waves={0: 1},
+                       notify_thread=_NOTIFY_THREAD)
+    assert extract_instance_id(f"body\n\n{manifest_block(m)}") == "c-production-1"
